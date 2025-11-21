@@ -1,0 +1,15 @@
+**/.git
+**/.gitignore
+**/.DS_Store
+**/node_modules
+**/vendor
+**/tmp
+**/logs
+**/*.log
+deploy/
+tests/
+scripts/
+.vscode
+.idea
+*.md
+

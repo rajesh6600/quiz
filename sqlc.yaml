@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - schema: "db/migrations"
+    queries: "db/sqlc/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/db/sqlc"
+        sql_package: "pgx/v5"
+        emit_prepared_queries: true
+        emit_interface: true
+        emit_json_tags: true
+        overrides:
+          - db_type: "pg_catalog.citext"
+            go_type: "string"
+
