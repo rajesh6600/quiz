@@ -48,6 +48,17 @@ type ConvertGuestRequest struct {
 	Password string
 }
 
+// ForgotPasswordRequest for requesting password reset.
+type ForgotPasswordRequest struct {
+	Email string
+}
+
+// ResetPasswordRequest for resetting password with token.
+type ResetPasswordRequest struct {
+	Token       string
+	NewPassword string
+}
+
 // OAuthProvider constants.
 const (
 	OAuthProviderGoogle = "google"

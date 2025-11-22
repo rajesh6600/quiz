@@ -296,6 +296,64 @@ func (h *HTTPHandlers) GetMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ForgotPassword handles POST /v1/auth/forgot-password
+func (h *HTTPHandlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		return
+	}
+
+	if req.Email == "" {
+		h.respondError(w, http.StatusBadRequest, "invalid_request", "Email required")
+		return
+	}
+
+	// Request password reset (always returns success for security)
+	if err := h.authSvc.RequestPasswordReset(r.Context(), req.Email); err != nil {
+		h.logger.Warn().Err(err).Str("email", req.Email).Msg("password reset request failed")
+		// Don't reveal error to client - security best practice
+	}
+
+	// Always return success to prevent email enumeration
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "If an account exists with this email, a password reset link has been sent",
+	})
+}
+
+// ResetPassword handles POST /v1/auth/reset-password
+func (h *HTTPHandlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		return
+	}
+
+	if req.Token == "" || req.NewPassword == "" {
+		h.respondError(w, http.StatusBadRequest, "invalid_request", "Token and new password required")
+		return
+	}
+
+	if err := h.authSvc.ResetPassword(r.Context(), req.Token, req.NewPassword); err != nil {
+		h.respondError(w, http.StatusBadRequest, "reset_failed", err.Error())
+		return
+	}
+
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Password reset successfully",
+	})
+}
+
 func (h *HTTPHandlers) respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

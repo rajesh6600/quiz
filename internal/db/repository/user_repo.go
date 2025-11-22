@@ -15,6 +15,7 @@ type userStore interface {
 	GetUserByID(ctx context.Context, userID pgtype.UUID) (sqlcgen.User, error)
 	PromoteGuestToRegistered(ctx context.Context, arg sqlcgen.PromoteGuestToRegisteredParams) (sqlcgen.User, error)
 	UpdateUserLogin(ctx context.Context, userID pgtype.UUID) error
+	UpdatePassword(ctx context.Context, arg sqlcgen.UpdatePasswordParams) error
 }
 
 // UserRepository exposes typed DB operations required by auth flows.
@@ -52,4 +53,18 @@ func (r *UserRepository) UpdateLogin(ctx context.Context, userID uuid.UUID) erro
 	pgUserID := pgtype.UUID{}
 	pgUserID.Scan(userID)
 	return r.store.UpdateUserLogin(ctx, pgUserID)
+}
+
+// UpdatePassword updates a user's password hash.
+func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	pgUserID := pgtype.UUID{}
+	pgUserID.Scan(userID)
+	pgHash := pgtype.Text{}
+	pgHash.Scan(passwordHash)
+	
+	params := sqlcgen.UpdatePasswordParams{
+		UserID:       pgUserID,
+		PasswordHash: pgHash,
+	}
+	return r.store.UpdatePassword(ctx, params)
 }

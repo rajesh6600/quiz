@@ -1,5 +1,8 @@
 package question
 
+import (
+	"github.com/google/uuid"
+)
 // Difficulty constants for readability.
 const (
 	DifficultyEasy   = "easy"
@@ -9,21 +12,19 @@ const (
 
 // Type constants.
 const (
-	TypeMCQ       = "mcq"
-	TypeTrueFalse = "true_false"
+	TypeMCQ = "mcq"
+	// Only MCQ questions are supported
 )
 
 // Question represents the normalized payload delivered to clients.
 type Question struct {
 	ID         string   `json:"id"`
-	Type       string   `json:"type"`
 	Prompt     string   `json:"prompt"`
 	Options    []string `json:"options"`
 	Answer     string   `json:"answer,omitempty"` // server-side only
-	Difficulty string   `json:"difficulty"`
-	Category   string   `json:"category"`
 	Source     string   `json:"source"`
 	Token      string   `json:"token"`
+	// Type, Difficulty, Category removed - not needed, only stored in DB
 }
 
 // PackRequest guides selection for matchmaking.
@@ -33,6 +34,9 @@ type PackRequest struct {
 	TotalQuestions     int
 	Seed               string
 	PerQuestionSeconds int
+	UserID             *uuid.UUID   // DEPRECATED: Use UserIDs for 1v1 matches (backward compatibility)
+	UserIDs            []*uuid.UUID  // NEW: For 1v1 matches - [player1, player2] for fair uniqueness checking
+	MatchMode          string       // Optional: "random_1v1" or "private_room" - determines if cross-match check applies
 }
 
 // PackResponse holds selected questions and metadata.

@@ -260,6 +260,107 @@ func (s *Service) metaKey(window string, userID uuid.UUID) string {
 	return fmt.Sprintf("%s:%s:meta:%s", s.prefix, window, userID.String())
 }
 
+// RecordPrivateRoomResult records a result to a room-specific leaderboard (separate from main leaderboard).
+func (s *Service) RecordPrivateRoomResult(ctx context.Context, roomCode string, req RecordRequest) error {
+	if !req.Eligible {
+		return nil
+	}
+
+	accuracy := 0.0
+	if req.QuestionCount > 0 {
+		accuracy = float64(req.CorrectCount) / float64(req.QuestionCount)
+	}
+
+	entry := Entry{
+		UserID:        req.UserID,
+		DisplayName:   req.DisplayName,
+		Score:         req.Score,
+		Wins:          boolToInt(req.Won),
+		Games:         1,
+		Accuracy:      accuracy,
+		CorrectTotal:  req.CorrectCount,
+		QuestionTotal: req.QuestionCount,
+	}
+
+	// Use room-specific keys
+	zKey := s.privateRoomLeaderboardKey(roomCode)
+	metaKey := s.privateRoomMetaKey(roomCode, entry.UserID)
+
+	pipe := s.redis.TxPipeline()
+	pipe.ZIncrBy(ctx, zKey, float64(entry.Score), entry.UserID.String())
+	pipe.HIncrBy(ctx, metaKey, "wins", int64(entry.Wins))
+	pipe.HIncrBy(ctx, metaKey, "games", int64(entry.Games))
+	pipe.HIncrBy(ctx, metaKey, "correct", int64(entry.CorrectTotal))
+	pipe.HIncrBy(ctx, metaKey, "questions", int64(entry.QuestionTotal))
+	pipe.HSet(ctx, metaKey, map[string]interface{}{
+		"display_name": entry.DisplayName,
+	})
+	// Private room leaderboards expire after 7 days of inactivity
+	pipe.Expire(ctx, zKey, 7*24*time.Hour)
+	pipe.Expire(ctx, metaKey, 7*24*time.Hour)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("update private room leaderboard %s: %w", roomCode, err)
+	}
+
+	return nil
+}
+
+// GetPrivateRoomLeaderboard retrieves the top N entries for a private room.
+func (s *Service) GetPrivateRoomLeaderboard(ctx context.Context, roomCode string, limit int) ([]Entry, error) {
+	if limit <= 0 || limit > s.topN {
+		limit = s.topN
+	}
+
+	zKey := s.privateRoomLeaderboardKey(roomCode)
+	results, err := s.redis.ZRevRangeWithScores(ctx, zKey, 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("fetch private room leaderboard: %w", err)
+	}
+
+	entries := make([]Entry, 0, len(results))
+	for _, z := range results {
+		meta, err := s.readPrivateRoomMeta(ctx, roomCode, z.Member.(string))
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("failed to read private room leaderboard metadata")
+			continue
+		}
+		meta.Score = int(z.Score)
+		entries = append(entries, *meta)
+	}
+	return entries, nil
+}
+
+func (s *Service) privateRoomLeaderboardKey(roomCode string) string {
+	return fmt.Sprintf("%s:private_room:%s", s.prefix, roomCode)
+}
+
+func (s *Service) privateRoomMetaKey(roomCode string, userID uuid.UUID) string {
+	return fmt.Sprintf("%s:private_room:%s:meta:%s", s.prefix, roomCode, userID.String())
+}
+
+func (s *Service) readPrivateRoomMeta(ctx context.Context, roomCode string, userIDStr string) (*Entry, error) {
+	metaKey := s.privateRoomMetaKey(roomCode, uuid.MustParse(userIDStr))
+	data, err := s.redis.HGetAll(ctx, metaKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return &Entry{UserID: uuid.MustParse(userIDStr)}, nil
+	}
+
+	entry := &Entry{UserID: uuid.MustParse(userIDStr)}
+	entry.DisplayName = data["display_name"]
+	entry.Wins = parseInt(data["wins"])
+	entry.Games = parseInt(data["games"])
+	entry.CorrectTotal = parseInt(data["correct"])
+	entry.QuestionTotal = parseInt(data["questions"])
+	if entry.QuestionTotal > 0 {
+		entry.Accuracy = float64(entry.CorrectTotal) / float64(entry.QuestionTotal)
+	}
+	return entry, nil
+}
+
 func boolToInt(v bool) int {
 	if v {
 		return 1

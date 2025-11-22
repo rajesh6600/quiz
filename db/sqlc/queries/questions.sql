@@ -1,9 +1,6 @@
 -- name: InsertQuestion :one
 INSERT INTO questions (
     source,
-    category,
-    difficulty,
-    type,
     prompt,
     options,
     correct_answer,
@@ -11,9 +8,6 @@ INSERT INTO questions (
     verified
 ) VALUES (
     sqlc.arg(source),
-    sqlc.arg(category),
-    sqlc.arg(difficulty),
-    sqlc.arg(type),
     sqlc.arg(prompt),
     sqlc.arg(options),
     sqlc.arg(correct_answer),
@@ -23,11 +17,9 @@ INSERT INTO questions (
 RETURNING *;
 
 -- name: GetQuestionPool :many
-SELECT *
+SELECT question_id, source, prompt, options, correct_answer, metadata, verified, created_at, updated_at
 FROM questions
-WHERE difficulty = ANY(sqlc.arg(difficulties)::text[])
-  AND category = ANY(sqlc.arg(categories)::text[])
-  AND verified = true
+WHERE verified = true
 ORDER BY RANDOM()
 LIMIT $1;
 
@@ -37,5 +29,5 @@ SET verified = sqlc.arg(verified),
     metadata = COALESCE(sqlc.arg(metadata), metadata),
     updated_at = NOW()
 WHERE question_id = sqlc.arg(question_id)
-RETURNING *;
+RETURNING question_id, source, prompt, options, correct_answer, metadata, verified, created_at, updated_at;
 

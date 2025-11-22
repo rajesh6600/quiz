@@ -30,16 +30,26 @@ func NewHTTPHandler(svc *Service, queries *sqlcgen.Queries, logger zerolog.Logge
 	}
 }
 
-// HandleGet responds with the current leaderboard for a given window.
-// Route: GET /v1/leaderboards/{window}?limit=10
+// HandleGet responds with the current leaderboard for a given window or private room.
+// Routes: GET /v1/leaderboards/{window}?limit=10
+//         GET /v1/leaderboards/private/{room_code}?limit=10
 func (h *HTTPHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	window := strings.TrimPrefix(r.URL.Path, "/v1/leaderboards/")
-	window = strings.TrimSuffix(window, "/")
+	path := strings.TrimPrefix(r.URL.Path, "/v1/leaderboards/")
+	path = strings.TrimSuffix(path, "/")
+	
+	// Check if it's a private room request
+	if strings.HasPrefix(path, "private/") {
+		h.HandleGetPrivateRoom(w, r)
+		return
+	}
+
+	// Otherwise, treat as window-based leaderboard
+	window := path
 	if window == "" || !isValidWindow(window) {
 		http.Error(w, "unknown leaderboard window", http.StatusNotFound)
 		return
@@ -114,6 +124,51 @@ func isValidWindow(window string) bool {
 	default:
 		return false
 	}
+}
+
+// HandleGetPrivateRoom responds with the leaderboard for a specific private room.
+// Route: GET /v1/leaderboards/private/{room_code}?limit=10
+func (h *HTTPHandler) HandleGetPrivateRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract room code from path: /v1/leaderboards/private/{room_code}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/leaderboards/private/")
+	roomCode := strings.TrimSuffix(path, "/")
+	if roomCode == "" {
+		http.Error(w, "room code required", http.StatusBadRequest)
+		return
+	}
+
+	limit := 10
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	ctx := r.Context()
+	var top []ws.LeaderboardEntry
+
+	if h.svc != nil {
+		if entries, err := h.svc.GetPrivateRoomLeaderboard(ctx, roomCode, limit); err == nil {
+			top = toWSEntries(entries)
+		} else {
+			h.logger.Warn().Err(err).Str("room_code", roomCode).Msg("private room leaderboard fetch failed")
+			http.Error(w, "failed to fetch leaderboard", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	resp := map[string]interface{}{
+		"room_code":   roomCode,
+		"top":         top,
+		"retrievedAt": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	writeJSON(w, resp)
 }
 
 func writeJSON(w http.ResponseWriter, payload interface{}) {

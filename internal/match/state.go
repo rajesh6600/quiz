@@ -147,9 +147,8 @@ type QuestionPackItem struct {
 	Order         int      `json:"order"`
 	ID            string   `json:"id"`
 	Prompt        string   `json:"prompt"`
-	Type          string   `json:"type"`
 	Options       []string `json:"options"`
 	Token         string   `json:"token"` // HMAC-signed
-	Difficulty    string   `json:"difficulty"`
 	CorrectAnswer string   `json:"correct_answer"` // server-side only
+	// Type, Difficulty, Category removed - not needed
 }

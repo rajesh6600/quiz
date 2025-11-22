@@ -2,9 +2,8 @@ package match
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -30,6 +29,7 @@ type PrivateRoom struct {
 	MaxPlayers         int
 	QuestionCount      int
 	PerQuestionSeconds int
+	Category           string // e.g., "general", "science", "history"
 	Players            []RoomPlayer
 	Status             string // "waiting", "starting", "active"
 	CreatedAt          time.Time
@@ -63,6 +63,12 @@ func NewRoomManager(redis *redis.Client, logger zerolog.Logger) *RoomManager {
 // CreateRoom generates a unique 6-character code and initializes a room.
 func (r *RoomManager) CreateRoom(ctx context.Context, req PrivateRoomRequest) (string, *PrivateRoom, error) {
 	code := r.generateRoomCode()
+	// Default category to "general" if not provided
+	category := req.Category
+	if category == "" {
+		category = "general"
+	}
+	
 	room := &PrivateRoom{
 		RoomCode:           code,
 		HostID:             req.HostID,
@@ -70,6 +76,7 @@ func (r *RoomManager) CreateRoom(ctx context.Context, req PrivateRoomRequest) (s
 		MaxPlayers:         req.MaxPlayers,
 		QuestionCount:      req.QuestionCount,
 		PerQuestionSeconds: req.PerQuestionSeconds,
+		Category:           category,
 		Players: []RoomPlayer{
 			{
 				UserID:      req.HostID,
@@ -117,11 +124,16 @@ func (r *RoomManager) JoinRoom(ctx context.Context, roomCode string, userID uuid
 		return nil, fmt.Errorf("room full")
 	}
 
-	// Check if already joined
+	// Check if already joined (prevent self-matching/duplicate joins)
 	for _, p := range room.Players {
 		if p.UserID == userID {
-			return room, nil // already in room
+			return nil, fmt.Errorf("user already in room") // prevent duplicate joins
 		}
+	}
+	
+	// Prevent host from joining their own room again
+	if userID == room.HostID {
+		return nil, fmt.Errorf("host cannot join their own room again")
 	}
 
 	room.Players = append(room.Players, RoomPlayer{
@@ -185,17 +197,14 @@ func (r *RoomManager) StartRoom(ctx context.Context, roomCode string, matchID uu
 	return room, nil
 }
 
-// generateRoomCode creates a 6-character uppercase alphanumeric code.
+// generateRoomCode creates a 6-digit numeric code (000000-999999).
 func (r *RoomManager) generateRoomCode() string {
 	for {
-		bytes := make([]byte, 4)
-		if _, err := rand.Read(bytes); err != nil {
-			// Fallback to UUID-based if rand fails
-			id := uuid.New()
-			idBytes, _ := id.MarshalBinary()
-			return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(idBytes)[:6]
-		}
-		code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes)[:6]
+		// Generate random number between 100000 and 999999
+		// Using 100000-999999 to ensure 6 digits (avoid leading zeros)
+		num := 100000 + rand.Intn(900000)
+		code := fmt.Sprintf("%06d", num)
+		
 		// Ensure uniqueness
 		r.mu.RLock()
 		_, exists := r.rooms[code]

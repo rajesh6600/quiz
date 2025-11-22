@@ -42,7 +42,9 @@ type Message struct {
 // Client Messages (incoming)
 
 type JoinQueuePayload struct {
-	QueueToken string `json:"queue_token"`
+	QueueToken    string `json:"queue_token"`
+	QuestionCount int    `json:"question_count,omitempty"` // 5, 10, or 15 (default: 10)
+	Category      string `json:"category,omitempty"`       // e.g., "general", "science", "history" (default: "general")
 }
 
 type CancelQueuePayload struct {
@@ -127,13 +129,12 @@ type QuestionBatchPayload struct {
 }
 
 type QuestionPayload struct {
-	Order      int      `json:"order"`
-	ID         string   `json:"id"`
-	Prompt     string   `json:"prompt"`
-	Type       string   `json:"type"`
-	Options    []string `json:"options"`
-	Token      string   `json:"token"`
-	Difficulty string   `json:"difficulty"`
+	Order   int      `json:"order"`
+	ID      string   `json:"id"`
+	Prompt  string   `json:"prompt"`
+	Options []string `json:"options"`
+	Token   string   `json:"token"`
+	// Removed: Type, Difficulty, Category (not needed by client, only server-side)
 }
 
 type QuestionTickPayload struct {

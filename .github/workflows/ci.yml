@@ -29,32 +29,40 @@ jobs:
           fi
 
       - name: Run unit tests
-        run: |
-          go test -v ./...
+        run: go test -v ./...
 
   docker:
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.REGISTRY_USERNAME != '' && secrets.REGISTRY_PASSWORD != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      REG_USER: ${{ secrets.REGISTRY_USERNAME }}
+      REG_PASS: ${{ secrets.REGISTRY_PASSWORD }}
+
     steps:
+      - name: Skip if secrets are missing
+        if: env.REG_USER == '' || env.REG_PASS == ''
+        run: |
+          echo "⚠️ REGISTRY_USERNAME or REGISTRY_PASSWORD not set. Skipping Docker build."
+          exit 0
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ env.REG_USER }}
+          password: ${{ env.REG_PASS }}
 
-      - name: Build and push
+      - name: Build & push image
         uses: docker/build-push-action@v5
         with:
-          push: true
           context: .
           file: Dockerfile
+          push: true
           tags: ghcr.io/${{ github.repository }}:latest
-

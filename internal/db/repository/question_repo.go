@@ -7,7 +7,7 @@ import (
 )
 
 type questionStore interface {
-	GetQuestionPool(ctx context.Context, arg sqlcgen.GetQuestionPoolParams) ([]sqlcgen.Question, error)
+	GetQuestionPool(ctx context.Context, limit int32) ([]sqlcgen.Question, error)
 	InsertQuestion(ctx context.Context, arg sqlcgen.InsertQuestionParams) (sqlcgen.Question, error)
 }
 
@@ -20,9 +20,9 @@ func NewQuestionRepository(store questionStore) *QuestionRepository {
 	return &QuestionRepository{store: store}
 }
 
-// FetchPool retrieves verified questions filtered by difficulty/category.
-func (r *QuestionRepository) FetchPool(ctx context.Context, params sqlcgen.GetQuestionPoolParams) ([]sqlcgen.Question, error) {
-	return r.store.GetQuestionPool(ctx, params)
+// FetchPool retrieves verified questions (no filters - type/difficulty/category removed).
+func (r *QuestionRepository) FetchPool(ctx context.Context, limit int32) ([]sqlcgen.Question, error) {
+	return r.store.GetQuestionPool(ctx, limit)
 }
 
 // Insert stores newly verified questions (e.g., from AI fallback) into Postgres.

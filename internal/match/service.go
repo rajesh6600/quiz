@@ -69,8 +69,39 @@ func NewService(
 	}
 }
 
+// getFixedDifficultyDistribution 
+func getFixedDifficultyDistribution(questionCount int) map[string]int {
+	switch questionCount {
+	case 5:
+		return map[string]int{
+			question.DifficultyEasy:   2,
+			question.DifficultyMedium: 2,
+			question.DifficultyHard:   1,
+		}
+	case 10:
+		return map[string]int{
+			question.DifficultyEasy:   4,
+			question.DifficultyMedium: 3,
+			question.DifficultyHard:   3,
+		}
+	case 15:
+		return map[string]int{
+			question.DifficultyEasy:   7,
+			question.DifficultyMedium: 5,
+			question.DifficultyHard:   3,
+		}
+	default:
+		// Fallback to 10-question distribution for invalid counts
+		return map[string]int{
+			question.DifficultyEasy:   4,
+			question.DifficultyMedium: 3,
+			question.DifficultyHard:   3,
+		}
+	}
+}
+
 // CreateRandomMatch creates a 1v1 match from a matched pair.
-func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, questionCount int, perQuestionSec int) (*Match, []QuestionPackItem, error) {
+func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, questionCount int, perQuestionSec int, category string) (*Match, []QuestionPackItem, error) {
 	matchID := uuid.New()
 	seedHash := fmt.Sprintf("%s-%d", matchID.String(), time.Now().Unix())
 
@@ -104,22 +135,26 @@ func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, 
 		return nil, nil, fmt.Errorf("create match: %w", err)
 	}
 
-	// Fetch question pack
-	diffCounts := map[string]int{
-		question.DifficultyEasy:   questionCount / 2,
-		question.DifficultyMedium: questionCount / 3,
-		question.DifficultyHard:   questionCount - (questionCount/2 + questionCount/3),
-	}
-	if diffCounts[question.DifficultyHard] < 0 {
-		diffCounts[question.DifficultyHard] = 0
-	}
+	// Get fixed difficulty distribution based on question count
+	diffCounts := getFixedDifficultyDistribution(questionCount)
 
+	// Get both player IDs for fair uniqueness checking
+	player1ID := pair.Player1.UserID
+	player2ID := pair.Player2.UserID
+	
+	// Use category from request, default to "general" if empty
+	if category == "" {
+		category = "general"
+	}
+	
 	packReq := question.PackRequest{
-		Category:           "general",
+		Category:           category,
 		DifficultyCounts:   diffCounts,
 		TotalQuestions:     questionCount,
 		Seed:               seedHash,
 		PerQuestionSeconds: perQuestionSec,
+		UserIDs:            []*uuid.UUID{&player1ID, &player2ID}, // Pass both players for fair checking
+		MatchMode:          ModeRandom1v1,
 	}
 
 	packResp, err := s.questionSvc.FetchPack(ctx, packReq)
@@ -135,10 +170,8 @@ func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, 
 			Order:         i + 1,
 			ID:            q.ID,
 			Prompt:        q.Prompt,
-			Type:          q.Type,
 			Options:       q.Options,
 			Token:         token,
-			Difficulty:    q.Difficulty,
 			CorrectAnswer: q.Answer,
 		}
 	}
@@ -146,6 +179,19 @@ func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, 
 	// Store questions in Redis
 	if err := s.stateMgr.StoreMatchQuestions(ctx, matchID, packItems); err != nil {
 		s.logger.Warn().Err(err).Msg("failed to cache questions")
+	}
+
+	// Save question IDs to user history for 1v1 matches (for cross-match uniqueness)
+	questionIDs := make([]string, len(packItems))
+	for i, item := range packItems {
+		questionIDs[i] = item.ID
+	}
+	// Save for both players
+	if err := s.questionSvc.AddUserQuestionHistory(ctx, pair.Player1.UserID, questionIDs); err != nil {
+		s.logger.Warn().Err(err).Str("user_id", pair.Player1.UserID.String()).Msg("failed to save question history")
+	}
+	if err := s.questionSvc.AddUserQuestionHistory(ctx, pair.Player2.UserID, questionIDs); err != nil {
+		s.logger.Warn().Err(err).Str("user_id", pair.Player2.UserID.String()).Msg("failed to save question history")
 	}
 
 	// Initialize player states
@@ -190,6 +236,143 @@ func (s *Service) CreateRandomMatch(ctx context.Context, pair *queue.MatchPair, 
 		GlobalTimeoutSeconds: globalTimeout,
 		SeedHash:             seedHash,
 		LeaderboardEligible:  createParams.LeaderboardEligible,
+		Status:               StatusPending,
+		CreatedAt:            time.Now(),
+		UpdatedAt:            time.Now(),
+	}
+
+	return match, packItems, nil
+}
+
+// CreatePrivateMatch creates a match from a private room.
+func (s *Service) CreatePrivateMatch(ctx context.Context, roomCode string, players []RoomPlayer, questionCount int, perQuestionSec int, category string) (*Match, []QuestionPackItem, error) {
+	matchID := uuid.New()
+	seedHash := fmt.Sprintf("%s-%d", matchID.String(), time.Now().Unix())
+
+	// Calculate global timeout
+	globalTimeout := (questionCount * perQuestionSec) + 20 // padding
+
+	// Create match record with room code in metadata
+	pgMatchID := pgtype.UUID{}
+	if err := pgMatchID.Scan(matchID); err != nil {
+		return nil, nil, fmt.Errorf("scan uuid: %w", err)
+	}
+
+	pgHostID := pgtype.UUID{}
+	if len(players) > 0 {
+		if err := pgHostID.Scan(players[0].UserID); err != nil {
+			return nil, nil, fmt.Errorf("scan host uuid: %w", err)
+		}
+	}
+
+	// Store room code in metadata
+	metadata := map[string]interface{}{
+		"room_code": roomCode,
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
+	createParams := sqlcgen.CreateMatchParams{
+		Mode:                 ModePrivateRoom,
+		QuestionCount:        int16(questionCount),
+		PerQuestionSeconds:   int16(perQuestionSec),
+		GlobalTimeoutSeconds: int16(globalTimeout),
+		SeedHash:             seedHash,
+		LeaderboardEligible:  true, // Private rooms can have leaderboards
+		Status:               StatusPending,
+		CreatedBy:            pgHostID,
+		Metadata:             metadataJSON,
+	}
+
+	_, err := s.matchRepo.Create(ctx, createParams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create match: %w", err)
+	}
+
+	// Get fixed difficulty distribution based on question count
+	diffCounts := getFixedDifficultyDistribution(questionCount)
+
+	// Use category from request, default to "general" if empty
+	if category == "" {
+		category = "general"
+	}
+	
+	// Private rooms: no cross-match uniqueness check
+	packReq := question.PackRequest{
+		Category:           category,
+		DifficultyCounts:   diffCounts,
+		TotalQuestions:     questionCount,
+		Seed:               seedHash,
+		PerQuestionSeconds: perQuestionSec,
+		UserID:             nil, // No user history check for private rooms
+		MatchMode:          ModePrivateRoom,
+	}
+
+	packResp, err := s.questionSvc.FetchPack(ctx, packReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch questions: %w", err)
+	}
+
+	// Convert to pack items with HMAC tokens
+	packItems := make([]QuestionPackItem, len(packResp.Questions))
+	for i, q := range packResp.Questions {
+		token := s.signQuestionToken(q.ID, q.Answer)
+		packItems[i] = QuestionPackItem{
+			Order:         i + 1,
+			ID:            q.ID,
+			Prompt:        q.Prompt,
+			Options:       q.Options,
+			Token:         token,
+			CorrectAnswer: q.Answer,
+		}
+	}
+
+	// Store questions in Redis
+	if err := s.stateMgr.StoreMatchQuestions(ctx, matchID, packItems); err != nil {
+		s.logger.Warn().Err(err).Msg("failed to cache questions")
+	}
+
+	// Initialize player states
+	now := time.Now()
+	for _, player := range players {
+		pgUserID := pgtype.UUID{}
+		if err := pgUserID.Scan(player.UserID); err != nil {
+			continue
+		}
+
+		state := PlayerState{
+			MatchID:     matchID,
+			UserID:      player.UserID,
+			IsGuest:     player.IsGuest,
+			DisplayName: player.DisplayName,
+			JoinedAt:    now,
+			Status:      PlayerStatusQueued,
+			Answers:     []AnswerRecord{},
+		}
+
+		if err := s.stateMgr.StorePlayerState(ctx, matchID, player.UserID, state); err != nil {
+			s.logger.Warn().Err(err).Str("user_id", player.UserID.String()).Msg("failed to store initial state")
+		}
+
+		// Also persist to DB
+		playerParams := sqlcgen.CreatePlayerMatchStateParams{
+			MatchID: pgMatchID,
+			UserID:  pgUserID,
+			IsGuest: player.IsGuest,
+			Status:  PlayerStatusQueued,
+		}
+		if err := s.matchRepo.UpsertPlayerState(ctx, playerParams); err != nil {
+			s.logger.Warn().Err(err).Msg("failed to persist player state to DB")
+		}
+	}
+
+	match := &Match{
+		ID:                   matchID,
+		Mode:                 ModePrivateRoom,
+		QuestionCount:        questionCount,
+		PerQuestionSeconds:   perQuestionSec,
+		GlobalTimeoutSeconds: globalTimeout,
+		SeedHash:             seedHash,
+		LeaderboardEligible: true,
 		Status:               StatusPending,
 		CreatedAt:            time.Now(),
 		UpdatedAt:            time.Now(),
@@ -243,8 +426,11 @@ func (s *Service) SubmitAnswer(ctx context.Context, matchID uuid.UUID, userID uu
 	// Validate answer
 	isCorrect := answer == targetQuestion.CorrectAnswer
 
-	// Calculate score - use default 15s per question (should come from match config)
-	perQuestionTimeout := 15 * time.Second
+	// Get match config for per-question timeout
+	perQuestionTimeout := 15 * time.Second // default fallback
+	if meta, err := s.matchRepo.GetSummary(ctx, matchID); err == nil {
+		perQuestionTimeout = time.Duration(meta.PerQuestionSeconds) * time.Second
+	}
 
 	// Count current streak
 	streak := 0
@@ -311,11 +497,24 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 	defer unlock()
 
 	var leaderboardEligible bool
+	var isPrivateRoom bool
+	var roomCode string
 	if s.leaderboard != nil {
 		if meta, err := s.matchRepo.GetSummary(ctx, matchID); err != nil {
 			s.logger.Warn().Err(err).Str("match_id", matchID.String()).Msg("failed to load match summary for leaderboard")
 		} else {
-			leaderboardEligible = meta.LeaderboardEligible && meta.Mode == ModeRandom1v1
+			leaderboardEligible = meta.LeaderboardEligible
+			isPrivateRoom = meta.Mode == ModePrivateRoom
+			
+			// Extract room code from metadata if private room
+			if isPrivateRoom && len(meta.Metadata) > 0 {
+				var metadata map[string]interface{}
+				if err := json.Unmarshal(meta.Metadata, &metadata); err == nil {
+					if rc, ok := metadata["room_code"].(string); ok {
+						roomCode = rc
+					}
+				}
+			}
 		}
 	}
 
@@ -325,13 +524,17 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 		return fmt.Errorf("get states: %w", err)
 	}
 
-	// Get match questions to determine timeout
+	// Get match questions and config
 	questions, err := s.stateMgr.GetMatchQuestions(ctx, matchID)
 	if err != nil {
 		return fmt.Errorf("get questions: %w", err)
 	}
 
-	perQuestionTimeout := 15 * time.Second // should come from match config
+	// Get per-question timeout from match config
+	perQuestionTimeout := 15 * time.Second // default fallback
+	if meta, err := s.matchRepo.GetSummary(ctx, matchID); err == nil {
+		perQuestionTimeout = time.Duration(meta.PerQuestionSeconds) * time.Second
+	}
 	totalQuestions := len(questions)
 
 	var leaderboardReqs []leaderboard.RecordRequest
@@ -459,10 +662,23 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 		}
 		for i := range leaderboardReqs {
 			leaderboardReqs[i].Won = leaderboardReqs[i].Score == highest
-			if err := s.leaderboard.RecordResult(ctx, leaderboardReqs[i]); err != nil {
-				s.logger.Warn().Err(err).
-					Str("user_id", leaderboardReqs[i].UserID.String()).
-					Msg("failed to record leaderboard result")
+			
+			// Route to appropriate leaderboard based on match mode
+			if isPrivateRoom && roomCode != "" {
+				// Private room leaderboard (separate from main)
+				if err := s.leaderboard.RecordPrivateRoomResult(ctx, roomCode, leaderboardReqs[i]); err != nil {
+					s.logger.Warn().Err(err).
+						Str("user_id", leaderboardReqs[i].UserID.String()).
+						Str("room_code", roomCode).
+						Msg("failed to record private room leaderboard result")
+				}
+			} else if meta, err := s.matchRepo.GetSummary(ctx, matchID); err == nil && meta.Mode == ModeRandom1v1 {
+				// Main leaderboard (only for random 1v1)
+				if err := s.leaderboard.RecordResult(ctx, leaderboardReqs[i]); err != nil {
+					s.logger.Warn().Err(err).
+						Str("user_id", leaderboardReqs[i].UserID.String()).
+						Msg("failed to record leaderboard result")
+				}
 			}
 		}
 	}

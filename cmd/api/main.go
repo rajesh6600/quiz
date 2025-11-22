@@ -1,8 +1,8 @@
 package main
 
 import (
-	// "os"
 	"context"
+	"os"
 	"log"
 	"time"
 	"github.com/joho/godotenv"
@@ -11,13 +11,12 @@ import (
 )
 
 func main() {
-	
-	err := godotenv.Load("configs/.env")
-	if err != nil {
-		log.Fatalf("failed to load .env file: %v", err)
+	if os.Getenv("APP_ENV") != "production" {
+		if err := godotenv.Load("configs/.env"); err != nil {
+			log.Printf("Warning: could not load .env file: %v", err)
+		}
 	}
-	// log.Println("GRACEFUL_SHUTDOWN_SECONDS:", os.Getenv("GRACEFUL_SHUTDOWN_SECONDS"))
-	// log.Println("QUESTION_FETCH_TIMEOUT_SECONDS:", os.Getenv("QUESTION_FETCH_TIMEOUT_SECONDS"))
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

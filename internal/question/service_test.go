@@ -18,7 +18,6 @@ import (
 
 	"github.com/gokatarajesh/quiz-platform/internal/db/repository"
 	sqlcgen "github.com/gokatarajesh/quiz-platform/internal/db/sqlc"
-	"github.com/gokatarajesh/quiz-platform/internal/question/external"
 )
 
 type stubQuestionStore struct {
@@ -68,22 +67,6 @@ func (c *memoryCache) Set(_ context.Context, req PackRequest, resp PackResponse)
 	return nil
 }
 
-type stubOpentdb struct {
-	questions []external.OpenTDBQuestion
-}
-
-func (s *stubOpentdb) Fetch(_ context.Context, amount int, difficulty, qType string) ([]external.OpenTDBQuestion, error) {
-	return s.questions[:min(amount, len(s.questions))], nil
-}
-
-type stubTrivia struct {
-	questions []external.TriviaAPIQuestion
-}
-
-func (s *stubTrivia) Fetch(_ context.Context, amount int, category, difficulty string) ([]external.TriviaAPIQuestion, error) {
-	return s.questions[:min(amount, len(s.questions))], nil
-}
-
 type stubAI struct {
 	mu        sync.Mutex
 	generated []Question
@@ -115,7 +98,7 @@ func TestFetchPackUsesCache(t *testing.T) {
 	})
 	cache := newMemoryCache()
 	ai := &stubAI{}
-	service := NewService(repo, cache, nil, nil, ai, ServiceOptions{HMACSecret: []byte("secret")})
+	service := NewService(repo, cache, ai, ServiceOptions{HMACSecret: []byte("secret")})
 
 	req := PackRequest{
 		Category: "general",
@@ -135,7 +118,7 @@ func TestFetchPackUsesCache(t *testing.T) {
 	assert.Len(t, cache.store, 1, "cache should store one entry")
 }
 
-func TestFetchPackFallsBackToExternalAndAI(t *testing.T) {
+func TestFetchPackFallsBackToAI(t *testing.T) {
 	repo := repository.NewQuestionRepository(&stubQuestionStore{
 		fetch: func(ctx context.Context, params sqlcgen.GetQuestionPoolParams) ([]sqlcgen.Question, error) {
 			return nil, nil
@@ -143,18 +126,14 @@ func TestFetchPackFallsBackToExternalAndAI(t *testing.T) {
 	})
 	cache := newMemoryCache()
 
-	opentdb := &stubOpentdb{
-		questions: []external.OpenTDBQuestion{
-			{Question: "OT Question", CorrectAnswer: "A", IncorrectAnswer: []string{"B", "C", "D"}, Difficulty: DifficultyEasy, Category: "general", Type: "multiple"},
-		},
-	}
 	ai := &stubAI{
 		generated: []Question{
-			{ID: "ai-1", Prompt: "AI Question", Options: []string{"T", "F"}, Answer: "T", Difficulty: DifficultyEasy, Category: "general"},
+			{ID: "ai-1", Prompt: "AI Question", Options: []string{"A", "B", "C", "D"}, Answer: "A", Difficulty: DifficultyEasy, Category: "general"},
+			{ID: "ai-2", Prompt: "AI Question 2", Options: []string{"A", "B", "C", "D"}, Answer: "B", Difficulty: DifficultyEasy, Category: "general"},
 		},
 	}
 
-	service := NewService(repo, cache, opentdb, nil, ai, ServiceOptions{HMACSecret: []byte("secret")})
+	service := NewService(repo, cache, ai, ServiceOptions{HMACSecret: []byte("secret")})
 	req := PackRequest{
 		Category: "general",
 		DifficultyCounts: map[string]int{
@@ -167,8 +146,9 @@ func TestFetchPackFallsBackToExternalAndAI(t *testing.T) {
 	resp, err := service.FetchPack(context.Background(), req)
 	assert.NoError(t, err)
 	assert.Len(t, resp.Questions, 2)
-	assert.Equal(t, "opentdb", resp.Questions[0].Source)
-	assert.Equal(t, "ai-1", resp.Questions[1].ID)
+	assert.Equal(t, "ai", resp.Questions[0].Source)
+	assert.Equal(t, "ai-1", resp.Questions[0].ID)
+	assert.Equal(t, "ai-2", resp.Questions[1].ID)
 }
 
 func TestFetcherWorkerEnqueueAIOnFailure(t *testing.T) {
@@ -181,7 +161,7 @@ func TestFetcherWorkerEnqueueAIOnFailure(t *testing.T) {
 	ai := &stubAI{
 		generated: []Question{{ID: "ai"}},
 	}
-	service := NewService(repo, cache, nil, nil, ai, ServiceOptions{HMACSecret: []byte("secret")})
+	service := NewService(repo, cache, ai, ServiceOptions{HMACSecret: []byte("secret")})
 
 	queue := make(chan PackRequest, 1)
 	queue <- PackRequest{

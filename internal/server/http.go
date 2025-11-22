@@ -55,6 +55,8 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		mux.HandleFunc("/v1/auth/guest", authHandlers.CreateGuest)
 		mux.HandleFunc("/v1/auth/convert", authHandlers.ConvertGuest)
 		mux.HandleFunc("/v1/auth/refresh", authHandlers.RefreshToken)
+		mux.HandleFunc("/v1/auth/forgot-password", authHandlers.ForgotPassword)
+		mux.HandleFunc("/v1/auth/reset-password", authHandlers.ResetPassword)
 		mux.HandleFunc("/v1/oauth/{provider}/start", authHandlers.OAuthStart)
 		mux.HandleFunc("/v1/oauth/{provider}/callback", authHandlers.OAuthCallback)
 		mux.HandleFunc("/v1/users/me", authHandlers.GetMe)
@@ -71,6 +73,8 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 
 	if leaderboardHandler != nil {
 		mux.HandleFunc("/v1/leaderboards/", leaderboardHandler)
+		// Private room leaderboard endpoint (must be before the general one to match first)
+		mux.HandleFunc("/v1/leaderboards/private/", leaderboardHandler)
 	}
 
 	return &http.Server{

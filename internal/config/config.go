@@ -22,6 +22,7 @@ type App struct {
 	OAuth       OAuth
 	Leaderboard Leaderboard
 	AI          AI
+	SMTP        SMTP
 }
 
 // Postgres captures connection info for the SQL database.
@@ -51,8 +52,8 @@ type Security struct {
 type Runtime struct {
 	QuestionFetchTimeout   time.Duration `env:"QUESTION_FETCH_TIMEOUT_SECONDS" envDefault:"4s"`
 	DefaultQuestionCount   int           `env:"DEFAULT_QUESTION_COUNT" envDefault:"5"`
-	DefaultQuestionSeconds int           `env:"DEFAULT_PER_QUESTION_SECONDS" envDefault:"15"`
-	GlobalPaddingSeconds   int           `env:"GLOBAL_TIMEOUT_PADDING_SECONDS" envDefault:"20s"`
+	DefaultQuestionSeconds time.Duration `env:"DEFAULT_PER_QUESTION_SECONDS" envDefault:"15s"`
+	GlobalPaddingSeconds   time.Duration `env:"GLOBAL_TIMEOUT_PADDING_SECONDS" envDefault:"20s"`
 }
 
 // Leaderboard governs snapshotting and broadcast behavior.
@@ -73,6 +74,15 @@ type AI struct {
 	GeneratorURL string        `env:"AI_GENERATOR_URL"`
 	GeneratorKey string        `env:"AI_GENERATOR_API_KEY"`
 	HTTPTimeout  time.Duration `env:"AI_HTTP_TIMEOUT" envDefault:"6s"`
+}
+
+// SMTP holds email server configuration.
+type SMTP struct {
+	Host     string `env:"SMTP_HOST"`
+	Port     int    `env:"SMTP_PORT" envDefault:"587"`
+	Username string `env:"SMTP_USERNAME"`
+	Password string `env:"SMTP_PASSWORD"`
+	FromEmail string `env:"SMTP_FROM_EMAIL"`
 }
 
 // Load parses environment variables into App config.

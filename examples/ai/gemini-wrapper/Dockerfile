@@ -1,45 +1,36 @@
-# # Start from the official Go image for building the binary
-# FROM golang:1.25.0-alpine AS builder
+# Build stage
+FROM golang:1.25.0-alpine AS builder
 
-# # Set environment variables
-# ENV CGO_ENABLED=0 \
-#     GOOS=linux \
-#     GOARCH=amd64
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
 
-# # Set working directory
-# WORKDIR /app
+WORKDIR /app
 
-# # Copy Go module files
-# COPY go.mod ./
-# # If you have go.sum later, you can copy it too
-# # COPY go.sum ./
+# Copy module file (no go.sum because wrapper has no deps)
+COPY go.mod ./
 
-# # Download dependencies (currently none, but keeps it ready)
-# RUN go mod tidy
+# Download modules (this will do nothing, but safe)
+RUN go mod tidy
 
-# # Copy the rest of the source code
-# COPY . .
+# Copy source
+COPY . .
 
-# # Build the binary
-# RUN go build -o gemini-wrapper main.go
+# Build binary
+RUN go build -o gemini-wrapper main.go
 
-# # Use a minimal image for the final container
-# FROM alpine:latest
+# Final image
+FROM alpine:latest
+RUN apk add --no-cache tzdata
 
-# # Set timezone if needed
-# RUN apk add --no-cache tzdata
+WORKDIR /app
 
-# WORKDIR /app
+COPY --from=builder /app/gemini-wrapper .
 
-# # Copy the binary from the builder stage
-# COPY --from=builder /app/gemini-wrapper .
+EXPOSE 9090
 
-# # Expose the port the server will run on
-# EXPOSE 9090
+ENV PORT=9090 \
+    GEMINI_MODEL=models/gemini-2.5-flash
 
-# # Set default environment variables (can be overridden)
-# ENV PORT=9090 \
-#     GEMINI_MODEL=models/gemini-1.5-flash
+CMD ["./gemini-wrapper"]
 
-# # Run the binary
-# CMD ["./gemini-wrapper"]

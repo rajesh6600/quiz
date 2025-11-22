@@ -32,7 +32,7 @@ spec:
         - name: postgres
           image: postgres:15-alpine
           ports:
-            - containerPort: 5433
+            - containerPort: 5432
           env:
             - name: POSTGRES_DB
               valueFrom:

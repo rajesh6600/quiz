@@ -2,11 +2,15 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 
 	"github.com/gokatarajesh/quiz-platform/internal/auth/jwt"
@@ -16,14 +20,18 @@ import (
 
 // Service handles authentication and user management.
 type Service struct {
-	userRepo *repository.UserRepository
-	tokenMgr *jwt.Manager
-	logger   zerolog.Logger
+	userRepo    *repository.UserRepository
+	tokenMgr    *jwt.Manager
+	redis       *redis.Client
+	emailSvc    *EmailService
+	logger      zerolog.Logger
 }
 
 // ServiceOptions configures the auth service.
 type ServiceOptions struct {
 	TokenConfig jwt.TokenConfig
+	Redis       *redis.Client
+	EmailSvc    *EmailService
 }
 
 // NewService creates an authentication service.
@@ -31,6 +39,8 @@ func NewService(userRepo *repository.UserRepository, opts ServiceOptions, logger
 	return &Service{
 		userRepo: userRepo,
 		tokenMgr: jwt.NewManager(opts.TokenConfig),
+		redis:    opts.Redis,
+		emailSvc: opts.EmailSvc,
 		logger:   logger,
 	}
 }
@@ -267,6 +277,109 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 // ValidateToken validates an access token and returns user claims.
 func (s *Service) ValidateToken(tokenString string) (*jwt.Claims, error) {
 	return s.tokenMgr.ValidateAccessToken(tokenString)
+}
+
+// RequestPasswordReset generates a reset token and sends reset email.
+func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
+	if s.redis == nil {
+		return fmt.Errorf("redis not configured for password reset")
+	}
+	if s.emailSvc == nil {
+		return fmt.Errorf("email service not configured")
+	}
+
+	// Find user by email
+	pgEmail := pgtype.Text{}
+	pgEmail.Scan(email)
+	dbUser, err := s.userRepo.GetByEmail(ctx, pgEmail)
+	if err != nil || dbUser.UserID.Bytes == [16]byte{} {
+		// Don't reveal if user exists - security best practice
+		return nil
+	}
+
+	// Generate secure random token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return fmt.Errorf("generate token: %w", err)
+	}
+	token := base64.URLEncoding.EncodeToString(tokenBytes)
+
+	// Store token in Redis with 1 hour TTL
+	userID, _ := uuid.FromBytes(dbUser.UserID.Bytes[:])
+	tokenData := map[string]string{
+		"user_id": userID.String(),
+		"email":   email,
+	}
+	tokenJSON, _ := json.Marshal(tokenData)
+
+	key := fmt.Sprintf("password_reset:%s", token)
+	if err := s.redis.Set(ctx, key, tokenJSON, time.Hour).Err(); err != nil {
+		return fmt.Errorf("store reset token: %w", err)
+	}
+
+	// Send email
+	if err := s.emailSvc.SendPasswordResetEmail(ctx, email, token); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+
+	s.logger.Info().Str("email", email).Msg("password reset requested")
+	return nil
+}
+
+// ResetPassword validates token and updates password.
+func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) error {
+	if s.redis == nil {
+		return fmt.Errorf("redis not configured for password reset")
+	}
+
+	// Validate password
+	if len(newPassword) < minPasswordLength {
+		return ErrPasswordTooShort
+	}
+
+	// Get token from Redis
+	key := fmt.Sprintf("password_reset:%s", token)
+	tokenDataJSON, err := s.redis.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return fmt.Errorf("invalid or expired reset token")
+	}
+	if err != nil {
+		return fmt.Errorf("get reset token: %w", err)
+	}
+
+	var tokenData map[string]string
+	if err := json.Unmarshal([]byte(tokenDataJSON), &tokenData); err != nil {
+		return fmt.Errorf("decode token data: %w", err)
+	}
+
+	userIDStr, ok := tokenData["user_id"]
+	if !ok {
+		return fmt.Errorf("invalid token data")
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// Hash new password
+	passwordHash, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	// Update user password
+	if err := s.userRepo.UpdatePassword(ctx, userID, passwordHash); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	// Delete token (single-use)
+	if err := s.redis.Del(ctx, key).Err(); err != nil {
+		s.logger.Warn().Err(err).Msg("failed to delete reset token")
+	}
+
+	s.logger.Info().Str("user_id", userID.String()).Msg("password reset completed")
+	return nil
 }
 
 func (s *Service) generateTokenPair(user User) (*TokenPair, error) {

@@ -92,4 +92,5 @@ type PrivateRoomRequest struct {
 	MaxPlayers         int
 	QuestionCount      int
 	PerQuestionSeconds int
+	Category           string // e.g., "general", "science", "history" (default: "general")
 }

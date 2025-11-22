@@ -37,3 +37,9 @@ SET email = sqlc.arg(email),
 WHERE user_id = sqlc.arg(user_id)
 RETURNING *;
 
+-- name: UpdatePassword :exec
+UPDATE users
+SET password_hash = sqlc.arg(password_hash),
+    updated_at = NOW()
+WHERE user_id = sqlc.arg(user_id);
+

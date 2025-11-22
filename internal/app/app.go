@@ -23,7 +23,6 @@ import (
 	matchqueue "github.com/gokatarajesh/quiz-platform/internal/match/queue"
 	"github.com/gokatarajesh/quiz-platform/internal/question"
 	"github.com/gokatarajesh/quiz-platform/internal/question/ai"
-	"github.com/gokatarajesh/quiz-platform/internal/question/external"
 	"github.com/gokatarajesh/quiz-platform/internal/server"
 	ws "github.com/gokatarajesh/quiz-platform/pkg/http/ws"
 )
@@ -83,9 +82,26 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 			Issuer:        cfg.Name,
 		}
 
+		// Create email service (if SMTP configured)
+		var emailSvc *auth.EmailService
+		if cfg.SMTP.Host != "" && cfg.SMTP.Username != "" {
+			emailSvc = auth.NewEmailService(auth.EmailConfig{
+				SMTPHost:     cfg.SMTP.Host,
+				SMTPPort:     cfg.SMTP.Port,
+				SMTPUsername: cfg.SMTP.Username,
+				SMTPPassword: cfg.SMTP.Password,
+				FromEmail:    cfg.SMTP.FromEmail,
+			}, logger)
+			logger.Info().Msg("Email service initialized")
+		} else {
+			logger.Warn().Msg("Email service not configured (missing SMTP settings)")
+		}
+
 		// Create auth service
 		authSvc = auth.NewService(userRepo, auth.ServiceOptions{
 			TokenConfig: tokenCfg,
+			Redis:       redisClient,
+			EmailSvc:    emailSvc,
 		}, logger)
 
 		// Create OAuth service (if configured)
@@ -118,8 +134,6 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 
 	// Core gameplay services
 	questionCache := question.NewCache(redisClient, 0)
-	opentdbClient := external.NewOpenTDBClient("", nil)
-	triviaClient := external.NewTriviaAPIClient("", "", nil)
 
 	var aiGenerator question.AIGenerator
 	if cfg.AI.GeneratorURL != "" {
@@ -133,10 +147,11 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 	questionSvc := question.NewService(
 		questionRepo,
 		questionCache,
-		opentdbClient,
-		triviaClient,
 		aiGenerator,
-		question.ServiceOptions{HMACSecret: []byte(cfg.Security.QuestionHMACSecret)},
+		question.ServiceOptions{
+			HMACSecret: []byte(cfg.Security.QuestionHMACSecret),
+			Redis:      redisClient,
+		},
 	)
 
 	stateMgr := match.NewStateManager(redisClient, logger)

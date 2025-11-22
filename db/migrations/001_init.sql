@@ -19,10 +19,7 @@ CREATE INDEX idx_users_type ON users(user_type);
 
 CREATE TABLE questions (
     question_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source            TEXT NOT NULL CHECK (source IN ('curated', 'opentdb', 'triviaapi', 'quizapi', 'kaggle', 'ai')),
-    category          TEXT NOT NULL,
-    difficulty        TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
-    type              TEXT NOT NULL CHECK (type IN ('mcq', 'true_false')),
+    source            TEXT NOT NULL CHECK (source IN ('curated', 'quizapi', 'kaggle', 'ai')),
     prompt            TEXT NOT NULL,
     options           TEXT[] NOT NULL,
     correct_answer    TEXT NOT NULL,
@@ -31,8 +28,6 @@ CREATE TABLE questions (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_questions_category ON questions(category);
-CREATE INDEX idx_questions_difficulty ON questions(difficulty);
 CREATE INDEX idx_questions_verified ON questions(verified);
 
 CREATE TABLE matches (

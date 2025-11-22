@@ -56,10 +56,11 @@ func (g *Generator) GeneratePack(ctx context.Context, req question.AIGenerateReq
 	}
 
 	payload := generatorRequest{
-		Category:   req.Category,
-		Difficulty: req.Difficulty,
-		Count:      req.Count,
-		Seed:       req.Seed,
+		Category:         req.Category,
+		Difficulty:       req.Difficulty,
+		Count:            req.Count,
+		Seed:             req.Seed,
+		DifficultyCounts: req.DifficultyCounts,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -109,10 +110,11 @@ func (g *Generator) EnqueuePack(ctx context.Context, req question.AIGenerateRequ
 	}
 
 	payload := generatorRequest{
-		Category:   req.Category,
-		Difficulty: req.Difficulty,
-		Count:      req.Count,
-		Seed:       req.Seed,
+		Category:         req.Category,
+		Difficulty:       req.Difficulty,
+		Count:            req.Count,
+		Seed:             req.Seed,
+		DifficultyCounts: req.DifficultyCounts,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -141,19 +143,12 @@ func (g *Generator) EnqueuePack(ctx context.Context, req question.AIGenerateRequ
 }
 
 func normalizeAIQuestion(q aiQuestion) question.Question {
-	qType := q.Type
-	if qType == "" {
-		qType = question.TypeMCQ
-	}
 	options := q.Options
 	if len(options) == 0 {
-		if qType == question.TypeTrueFalse {
-			options = []string{"True", "False"}
-		} else {
-			options = []string{q.Answer}
-		}
+		options = []string{q.Answer}
 	}
-	// ensure answer present in options
+	
+	// Ensure answer present in options
 	found := false
 	for _, opt := range options {
 		if strings.EqualFold(opt, q.Answer) {
@@ -171,22 +166,21 @@ func normalizeAIQuestion(q aiQuestion) question.Question {
 	}
 
 	return question.Question{
-		ID:         id,
-		Type:       qType,
-		Prompt:     q.Prompt,
-		Options:    options,
-		Answer:     q.Answer,
-		Difficulty: q.Difficulty,
-		Category:   q.Category,
-		Source:     "ai",
+		ID:      id,
+		Prompt:  q.Prompt,
+		Options: options,
+		Answer:  q.Answer,
+		Source:  "ai",
+		// Type, Difficulty, Category removed - not needed
 	}
 }
 
 type generatorRequest struct {
-	Category   string `json:"category"`
-	Difficulty string `json:"difficulty"`
-	Count      int    `json:"count"`
-	Seed       string `json:"seed"`
+	Category         string         `json:"category"`
+	Difficulty       string         `json:"difficulty"`
+	Count            int            `json:"count"`
+	Seed             string         `json:"seed"`
+	DifficultyCounts map[string]int `json:"difficulty_counts"`
 }
 
 type aiQuestion struct {
@@ -194,9 +188,8 @@ type aiQuestion struct {
 	Prompt     string   `json:"prompt"`
 	Options    []string `json:"options"`
 	Answer     string   `json:"answer"`
-	Type       string   `json:"type"`
-	Difficulty string   `json:"difficulty"`
-	Category   string   `json:"category"`
+	// Type, Difficulty, Category removed - not needed from Gemini
+	// Server will infer Type from options count and set defaults
 }
 
 type generatorResponse struct {

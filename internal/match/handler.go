@@ -81,21 +81,35 @@ func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, display
 		return h.sendError(userID, "invalid_payload", "Invalid join_queue payload")
 	}
 
+	// Get category from client, default to "general"
+	category := req.Category
+	if category == "" {
+		category = "general"
+	}
+	
 	// Enqueue player
 	queueToken, pair, err := h.service.queueMgr.Enqueue(ctx, queue.MatchmakingRequest{
 		UserID:            userID,
 		DisplayName:       displayName,
 		IsGuest:           isGuest,
-		PreferredCategory: "general",
+		PreferredCategory: category,
 		BotOK:             true,
 	})
 	if err != nil {
 		return h.sendError(userID, "enqueue_failed", err.Error())
 	}
 
-	// If match found immediately
-	if pair != nil {
-		match, questions, err := h.service.CreateRandomMatch(ctx, pair, 5, 15)
+		// If match found immediately
+		if pair != nil {
+			questionCount := req.QuestionCount
+			if questionCount == 0 {
+				questionCount = 10 // default
+			}
+			// Validate question count (must be 5, 10, or 15)
+			if questionCount != 5 && questionCount != 10 && questionCount != 15 {
+				questionCount = 10 // fallback to default
+			}
+			match, questions, err := h.service.CreateRandomMatch(ctx, pair, questionCount, 15, category)
 		if err != nil {
 			return h.sendError(userID, "match_creation_failed", err.Error())
 		}
@@ -173,10 +187,48 @@ func (h *Handler) handleJoinPrivate(ctx context.Context, userID uuid.UUID, displ
 		return h.sendError(userID, "join_failed", err.Error())
 	}
 
+	// Check if this is the first non-host player joining (trigger question generation)
+	wasWaiting := len(room.Players) == 2
+	isNonHost := userID != room.HostID
+	
+	if wasWaiting && isNonHost && room.MatchID == nil {
+		// First non-host player joined - generate questions
+		players := make([]RoomPlayer, len(room.Players))
+		for i, p := range room.Players {
+			players[i] = RoomPlayer{
+				UserID:      p.UserID,
+				DisplayName: p.DisplayName,
+				IsGuest:     p.IsGuest,
+				IsHost:      p.IsHost,
+			}
+		}
+		
+		match, questions, err := h.service.CreatePrivateMatch(ctx, req.RoomCode, players, room.QuestionCount, room.PerQuestionSeconds, room.Category)
+		if err != nil {
+			return h.sendError(userID, "match_creation_failed", err.Error())
+		}
+		
+		// Update room with match ID
+		_, err = h.service.roomMgr.StartRoom(ctx, req.RoomCode, match.ID, room.StartCountdown)
+		if err != nil {
+			return h.sendError(userID, "room_start_failed", err.Error())
+		}
+		
+		// Join all players to match in hub
+		for _, p := range room.Players {
+			h.hub.JoinMatch(match.ID, p.UserID)
+		}
+		
+		// Store questions in room state (they'll be sent when match actually starts)
+		// For now, we'll send them immediately after countdown
+		// TODO: Implement countdown logic and send questions after countdown
+		h.sendQuestions(match.ID, questions)
+	}
+
 	// Convert players
-	players := make([]ws.Player, len(room.Players))
+	wsPlayers := make([]ws.Player, len(room.Players))
 	for i, p := range room.Players {
-		players[i] = ws.Player{
+		wsPlayers[i] = ws.Player{
 			UserID:      p.UserID.String(),
 			DisplayName: p.DisplayName,
 		}
@@ -185,7 +237,7 @@ func (h *Handler) handleJoinPrivate(ctx context.Context, userID uuid.UUID, displ
 	update := ws.PrivateRoomUpdatePayload{
 		MatchID:        "",
 		RoomCode:       room.RoomCode,
-		Players:        players,
+		Players:        wsPlayers,
 		SlotsRemaining: room.MaxPlayers - len(room.Players),
 	}
 	if room.MatchID != nil {
@@ -259,13 +311,12 @@ func (h *Handler) sendQuestions(matchID uuid.UUID, questions []QuestionPackItem)
 	wsQuestions := make([]ws.QuestionPayload, len(questions))
 	for i, q := range questions {
 		wsQuestions[i] = ws.QuestionPayload{
-			Order:      q.Order,
-			ID:         q.ID,
-			Prompt:     q.Prompt,
-			Type:       q.Type,
-			Options:    q.Options,
-			Token:      q.Token,
-			Difficulty: q.Difficulty,
+			Order:   q.Order,
+			ID:      q.ID,
+			Prompt:  q.Prompt,
+			Options: q.Options,
+			Token:   q.Token,
+			// Type, Difficulty, Category removed - not needed by client
 		}
 	}
 

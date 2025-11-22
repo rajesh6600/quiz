@@ -1,34 +1,17 @@
 version: "3.9"
 
 services:
-  app:
-    profiles: ["disabled"]
-
-  postgres:
-    ports:
-      - "5433:5432"
-
-  postgres_test:
+  db:
     image: postgres:15-alpine
-    restart: unless-stopped
+    container_name: quiz-db-main
     environment:
-      POSTGRES_DB: quiz_test
-      POSTGRES_USER: quiz
-      POSTGRES_PASSWORD: quizpass
+      POSTGRES_DB: quizapp      # your main DB
+      POSTGRES_USER: quiz       # main DB user
+      POSTGRES_PASSWORD: quizpass  # must be non-empty
     ports:
-      - "5434:5432"
+      - "5432:5432"             # host:container
     volumes:
-      - pgtestdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quiz -d quiz_test"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    ports:
-      - "6379:6379"
+      - main-db-data:/var/lib/postgresql/data
 
 volumes:
-  pgtestdata:
-
+  main-db-data:
