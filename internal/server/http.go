@@ -26,7 +26,7 @@ var WSUpgrader = websocket.Upgrader{
 
 // NewHTTPServer wires base routes (health, metrics) for the API service.
 // authHandlers can be nil if auth is not yet initialized.
-func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
+func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, matchRoomHandler http.Handler, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +76,11 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		mux.HandleFunc("/v1/leaderboards/", leaderboardHandler)
 		// Private room leaderboard endpoint (must be before the general one to match first)
 		mux.HandleFunc("/v1/leaderboards/private/", leaderboardHandler)
+	}
+
+	// Match endpoints (rooms) - handler is already wrapped with middleware
+	if matchRoomHandler != nil {
+		mux.Handle("/v1/rooms", matchRoomHandler)
 	}
 
 	return &http.Server{

@@ -685,3 +685,8 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 
 	return nil
 }
+
+// CreateRoom creates a private room via RoomManager.
+func (s *Service) CreateRoom(ctx context.Context, req PrivateRoomRequest) (string, *PrivateRoom, error) {
+	return s.roomMgr.CreateRoom(ctx, req)
+}

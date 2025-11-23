@@ -174,6 +174,18 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 	)
 
 	matchWSHandler := match.NewHandler(matchSvc, wsHub, authSvc, logger)
+	matchHTTPHandlers := match.NewHTTPHandlers(matchSvc, logger)
+	
+	// Apply auth middleware chain to room creation endpoint
+	var matchRoomHandler http.Handler
+	if matchHTTPHandlers != nil && authSvc != nil {
+		authMiddleware := auth.AuthMiddleware(authSvc, logger)
+		requireAuth := auth.RequireAuth
+		requireRegistered := auth.RequireRegistered
+		roomsHandler := http.HandlerFunc(matchHTTPHandlers.CreateRoom)
+		matchRoomHandler = requireRegistered(requireAuth(authMiddleware(roomsHandler)))
+	}
+	
 	lbBroadcaster := leaderboard.NewBroadcaster(redisClient, wsHub, "", logger)
 	lbHTTPHandler := leaderboard.NewHTTPHandler(leaderboardSvc, queries, logger)
 	var snapshotWorker *leaderboard.SnapshotWorker
@@ -187,7 +199,7 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 		)
 	}
 
-	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
+	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, matchRoomHandler, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
 
 	return &Application{
 		cfg:            cfg,

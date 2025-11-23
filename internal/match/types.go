@@ -94,3 +94,12 @@ type PrivateRoomRequest struct {
 	PerQuestionSeconds int
 	Category           string // e.g., "general", "science", "history" (default: "general")
 }
+
+// CreateRoomRequest for HTTP request payload when creating a private room.
+type CreateRoomRequest struct {
+	MatchName          string `json:"match_name"`
+	MaxPlayers         int    `json:"max_players"`
+	QuestionCount      int    `json:"question_count"`      // 5, 10, or 15
+	PerQuestionSeconds int   `json:"per_question_seconds"` // e.g., 15
+	Category           string `json:"category,omitempty"`   // default: "general"
+}
