@@ -101,7 +101,8 @@ func createWSOriginChecker(cfg config.CORS) func(*http.Request) bool {
 
 // NewHTTPServer wires base routes (health, metrics) for the API service.
 // authHandlers can be nil if auth is not yet initialized.
-func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, matchGetRoomHandler http.HandlerFunc, matchRoomHandler http.Handler, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
+// authSvc is needed for applying auth middleware to protected endpoints.
+func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, authSvc *auth.Service, matchGetRoomHandler http.HandlerFunc, matchRoomHandler http.Handler, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -134,8 +135,24 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		mux.HandleFunc("/v1/auth/reset-password", authHandlers.ResetPassword)
 		mux.HandleFunc("/v1/oauth/{provider}/start", authHandlers.OAuthStart)
 		mux.HandleFunc("/v1/oauth/{provider}/callback", authHandlers.OAuthCallback)
-		mux.HandleFunc("/v1/users/me", authHandlers.GetMe)
-		mux.HandleFunc("/v1/users/me/username", authHandlers.SetUsername)
+		
+		// Protected user endpoints - apply auth middleware
+		if authSvc != nil {
+			logger.Info().Msg("applying auth middleware to /v1/users/me endpoints")
+			authMiddleware := auth.AuthMiddleware(authSvc, logger)
+			requireAuth := auth.RequireAuth
+			
+			// Middleware order: authMiddleware validates token first, then requireAuth checks claims
+			getMeHandler := http.HandlerFunc(authHandlers.GetMe)
+			mux.Handle("/v1/users/me", authMiddleware(requireAuth(getMeHandler)))
+			
+			setUsernameHandler := http.HandlerFunc(authHandlers.SetUsername)
+			mux.Handle("/v1/users/me/username", authMiddleware(requireAuth(setUsernameHandler)))
+		} else {
+			logger.Warn().Msg("authSvc is nil, /v1/users/me endpoints will not have auth middleware")
+			mux.HandleFunc("/v1/users/me", authHandlers.GetMe)
+			mux.HandleFunc("/v1/users/me/username", authHandlers.SetUsername)
+		}
 	}
 
 	// WebSocket endpoint

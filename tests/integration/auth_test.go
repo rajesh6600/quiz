@@ -164,7 +164,8 @@ func TestGetMe(t *testing.T) {
 func TestSetUsername(t *testing.T) {
 	baseURL := envOrDefault("INTEGRATION_BASE_URL", "http://localhost:8080")
 	user := createRegisteredUser(t, baseURL, fmt.Sprintf("setuser-%d@example.com", time.Now().UnixNano()), "testpassword123")
-	username := fmt.Sprintf("testuser%d", time.Now().UnixNano())
+	// Generate a short username (max 10 chars) - use last 4 digits of timestamp
+	username := fmt.Sprintf("user%d", time.Now().UnixNano()%10000)
 
 	payload := map[string]string{
 		"username": username,

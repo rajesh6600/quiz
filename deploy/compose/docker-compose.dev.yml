@@ -17,6 +17,15 @@ services:
       APP_ENV: development
       AI_GENERATOR_URL: http://wrapper:9090
       AI_GENERATOR_API_KEY: ${AI_GENERATOR_API_KEY}
+      PG_HOST: db
+      PG_PORT: 5432
+      PG_USER: quiz
+      PG_PASSWORD: quizpass
+      PG_DATABASE: quiz_dev
+      PG_SSL_MODE: disable
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-test-jwt-secret-key}
+      QUESTION_HMAC_SECRET: ${QUESTION_HMAC_SECRET:-test-hmac-secret-key}
 
   wrapper:
     build:
@@ -37,7 +46,7 @@ services:
       - .env
     container_name: quiz-db-dev
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Use 5433 to avoid conflict with local PostgreSQL
     volumes:
       - dev-db-data:/var/lib/postgresql/data
 

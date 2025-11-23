@@ -5,7 +5,6 @@ package integration
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"testing"
 	"time"

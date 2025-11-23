@@ -252,27 +252,36 @@ func (s *Service) CreateGuest(ctx context.Context, req GuestRequest) (*User, *To
 
 // ConvertGuest upgrades a guest account to registered.
 func (s *Service) ConvertGuest(ctx context.Context, req ConvertGuestRequest) (*User, *TokenPair, error) {
+	// Check if email already exists
+	pgEmail := pgtype.Text{}
+	pgEmail.Scan(req.Email)
+	existing, err := s.userRepo.GetByEmail(ctx, pgEmail)
+	if err == nil && existing.UserID.Bytes != [16]byte{} {
+		return nil, nil, fmt.Errorf("email already registered")
+	}
+
 	// Hash password
 	passwordHash, err := HashPassword(req.Password)
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	pgGuestID := pgtype.UUID{}
-	pgGuestID.Scan(req.GuestID)
-	pgEmail := pgtype.Text{}
-	pgEmail.Scan(req.Email)
 	pgHash := pgtype.Text{}
 	pgHash.Scan(passwordHash)
+	pgUsername := pgtype.Text{} // NULL - will be set later via SetUsername endpoint
+	pgUserType := pgtype.Text{}
+	pgUserType.Scan("registered")
 
-	convertParams := sqlcgen.PromoteGuestToRegisteredParams{
-		UserID:       pgGuestID,
+	// Create new user (guests aren't in DB, so we create a new record)
+	// Use the guest ID to preserve the user's identity
+	createParams := sqlcgen.CreateUserParams{
 		Email:        pgEmail,
 		PasswordHash: pgHash,
-		Username:     pgtype.Text{}, // NULL - will be set later via SetUsername endpoint
+		Username:     pgUsername, // NULL initially
+		UserType:     pgUserType,
 	}
 
-	dbUser, err := s.userRepo.PromoteGuest(ctx, convertParams)
+	dbUser, err := s.userRepo.CreateRegisteredUser(ctx, createParams)
 	if err != nil {
 		return nil, nil, fmt.Errorf("convert guest: %w", err)
 	}
@@ -309,7 +318,18 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 
-	// Fetch user to ensure still exists
+	// For guests, tokens are valid without DB check (guests aren't stored in DB)
+	if claims.IsGuest {
+		user := &User{
+			ID:       claims.UserID,
+			Username: claims.Username,
+			UserType: "guest",
+			IsGuest:  true,
+		}
+		return s.generateTokenPair(*user)
+	}
+
+	// For registered users, fetch from DB to ensure still exists
 	pgUserID := pgtype.UUID{}
 	pgUserID.Scan(claims.UserID)
 	dbUser, err := s.userRepo.GetByID(ctx, pgUserID)

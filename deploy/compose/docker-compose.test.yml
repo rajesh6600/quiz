@@ -5,13 +5,22 @@ services:
     image: postgres:15-alpine
     container_name: quiz-db-main
     environment:
-      POSTGRES_DB: quizapp      # your main DB
-      POSTGRES_USER: quiz       # main DB user
+      POSTGRES_DB: quiz_dev      # Use quiz_dev to match app config
+      POSTGRES_USER: quiz         # main DB user
       POSTGRES_PASSWORD: quizpass  # must be non-empty
     ports:
-      - "5432:5432"             # host:container
+      - "5434:5432"             # host:container (5434 for tests to avoid conflict)
     volumes:
       - main-db-data:/var/lib/postgresql/data
+
+  app:
+    environment:
+      PG_HOST: db
+      PG_PORT: 5432
+      PG_USER: quiz
+      PG_PASSWORD: quizpass
+      PG_DATABASE: quiz_dev
+      PG_SSL_MODE: disable
 
 volumes:
   main-db-data:

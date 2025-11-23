@@ -11,6 +11,13 @@ import (
 	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // AuthMiddleware validates JWT tokens and injects user claims into request context.
 func AuthMiddleware(authSvc *Service, logger zerolog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -32,10 +39,11 @@ func AuthMiddleware(authSvc *Service, logger zerolog.Logger) func(http.Handler) 
 			token := parts[1]
 			claims, err := authSvc.ValidateToken(token)
 			if err != nil {
-				logger.Warn().Err(err).Msg("token validation failed")
+				logger.Warn().Err(err).Str("token_preview", token[:min(20, len(token))]).Msg("token validation failed")
 				httperrors.RespondUnauthorized(w, httperrors.ErrCodeInvalidToken, "Invalid or expired token")
 				return
 			}
+			logger.Debug().Str("user_id", claims.UserID.String()).Bool("is_guest", claims.IsGuest).Msg("token validated successfully")
 
 			// Inject claims into context
 			ctx := context.WithValue(r.Context(), "claims", claims)

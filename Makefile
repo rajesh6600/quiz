@@ -107,7 +107,23 @@ wrapper-logs:
 
 .PHONY: integration-test
 integration-test:
+	@echo "Starting test infrastructure..."
 	docker compose -f $(DEV_COMPOSE) -f deploy/compose/docker-compose.test.yml up -d --remove-orphans
-	APP_ENV=test PG_HOST=localhost PG_PORT=5434 PG_DATABASE=quiz_test PG_USER=quiz PG_PASSWORD=quizpass \
-	go test $(GOFLAGS) $(GOTESTFLAGS) ./tests/integration/...
+	@echo "Waiting for services to be ready..."
+	@sleep 3
+	@echo "Running integration tests..."
+	APP_ENV=test \
+	PG_HOST=localhost PG_PORT=5434 PG_DATABASE=quiz_test PG_USER=quiz PG_PASSWORD=quizpass \
+	INTEGRATION_BASE_URL=http://localhost:8080 \
+	INTEGRATION_WS_URL=ws://localhost:8080/ws/matches \
+	go test $(GOFLAGS) $(GOTESTFLAGS) -tags=integration ./tests/integration/...
+	@echo "Cleaning up test infrastructure..."
 	docker compose -f $(DEV_COMPOSE) -f deploy/compose/docker-compose.test.yml down -v
+
+.PHONY: integration-test-local
+integration-test-local:
+	@echo "Running integration tests against local server..."
+	@echo "Make sure the server is running at http://localhost:8080"
+	INTEGRATION_BASE_URL=http://localhost:8080 \
+	INTEGRATION_WS_URL=ws://localhost:8080/ws/matches \
+	go test $(GOFLAGS) $(GOTESTFLAGS) -tags=integration ./tests/integration/...

@@ -177,13 +177,14 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 	matchHTTPHandlers := match.NewHTTPHandlers(matchSvc, logger)
 	
 	// Apply auth middleware chain to room creation endpoint
+	// Middleware order: authMiddleware validates token first, then requireAuth checks claims, then requireRegistered checks user type
 	var matchRoomHandler http.Handler
 	if matchHTTPHandlers != nil && authSvc != nil {
 		authMiddleware := auth.AuthMiddleware(authSvc, logger)
 		requireAuth := auth.RequireAuth
 		requireRegistered := auth.RequireRegistered
 		roomsHandler := http.HandlerFunc(matchHTTPHandlers.CreateRoom)
-		matchRoomHandler = requireRegistered(requireAuth(authMiddleware(roomsHandler)))
+		matchRoomHandler = authMiddleware(requireAuth(requireRegistered(roomsHandler)))
 	}
 	
 	lbBroadcaster := leaderboard.NewBroadcaster(redisClient, wsHub, "", logger)
@@ -199,7 +200,7 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 		)
 	}
 
-	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, matchHTTPHandlers.GetRoom, matchRoomHandler, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
+	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, authSvc, matchHTTPHandlers.GetRoom, matchRoomHandler, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
 
 	return &Application{
 		cfg:            cfg,

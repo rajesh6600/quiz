@@ -36,8 +36,9 @@ func envOrDefault(key, fallback string) string {
 func createGuest(t *testing.T, baseURL, displayName string) guestInfo {
 	t.Helper()
 
+	// GuestRequest only expects device_fingerprint (optional), username is auto-generated
 	payload := map[string]string{
-		"display_name": fmt.Sprintf("%s-%d", displayName, time.Now().UnixNano()),
+		"device_fingerprint": fmt.Sprintf("%s-%d", displayName, time.Now().UnixNano()),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -51,7 +52,9 @@ func createGuest(t *testing.T, baseURL, displayName string) guestInfo {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("unexpected guest response status: %d", resp.StatusCode)
+		var errResp map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		t.Fatalf("unexpected guest response status: %d, error: %v", resp.StatusCode, errResp)
 	}
 
 	var out struct {

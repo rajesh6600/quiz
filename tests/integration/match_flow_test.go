@@ -6,11 +6,8 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 
 	wsmsg "github.com/gokatarajesh/quiz-platform/pkg/http/ws"
 )
