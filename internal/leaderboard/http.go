@@ -12,6 +12,7 @@ import (
 
 	sqlcgen "github.com/gokatarajesh/quiz-platform/internal/db/sqlc"
 	ws "github.com/gokatarajesh/quiz-platform/pkg/http/ws"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // HTTPHandler exposes REST endpoints for leaderboard queries.
@@ -36,7 +37,7 @@ func NewHTTPHandler(svc *Service, queries *sqlcgen.Queries, logger zerolog.Logge
 //	GET /v1/leaderboards/private/{room_code}?limit=10
 func (h *HTTPHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
@@ -52,7 +53,7 @@ func (h *HTTPHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	// Otherwise, treat as window-based leaderboard
 	window := path
 	if window == "" || !isValidWindow(window) {
-		http.Error(w, "unknown leaderboard window", http.StatusNotFound)
+		httperrors.RespondNotFound(w, httperrors.ErrCodeUnknownWindow, "Unknown leaderboard window")
 		return
 	}
 
@@ -131,7 +132,7 @@ func isValidWindow(window string) bool {
 // Route: GET /v1/leaderboards/private/{room_code}?limit=10
 func (h *HTTPHandler) HandleGetPrivateRoom(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
@@ -139,7 +140,7 @@ func (h *HTTPHandler) HandleGetPrivateRoom(w http.ResponseWriter, r *http.Reques
 	path := strings.TrimPrefix(r.URL.Path, "/v1/leaderboards/private/")
 	roomCode := strings.TrimSuffix(path, "/")
 	if roomCode == "" {
-		http.Error(w, "room code required", http.StatusBadRequest)
+		httperrors.RespondValidationError(w, httperrors.ErrCodeInvalidRequest, "Room code required", "room_code")
 		return
 	}
 
@@ -158,7 +159,7 @@ func (h *HTTPHandler) HandleGetPrivateRoom(w http.ResponseWriter, r *http.Reques
 			top = toWSEntries(entries)
 		} else {
 			h.logger.Warn().Err(err).Str("room_code", roomCode).Msg("private room leaderboard fetch failed")
-			http.Error(w, "failed to fetch leaderboard", http.StatusInternalServerError)
+			httperrors.RespondInternalError(w, "Failed to fetch leaderboard")
 			return
 		}
 	}
@@ -175,6 +176,6 @@ func (h *HTTPHandler) HandleGetPrivateRoom(w http.ResponseWriter, r *http.Reques
 func writeJSON(w http.ResponseWriter, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		httperrors.RespondInternalError(w, "Failed to encode response")
 	}
 }

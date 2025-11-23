@@ -19,6 +19,7 @@ import (
 	"github.com/gokatarajesh/quiz-platform/internal/match/queue"
 	"github.com/gokatarajesh/quiz-platform/internal/match/scoring"
 	"github.com/gokatarajesh/quiz-platform/internal/question"
+	"github.com/gokatarajesh/quiz-platform/pkg/http/ws"
 )
 
 // Service orchestrates match lifecycle, scoring, and state transitions.
@@ -489,10 +490,11 @@ func (s *Service) signQuestionToken(questionID, correctAnswer string) string {
 }
 
 // FinalizeMatch computes final scores and updates DB.
-func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
+// Returns match complete payload for WebSocket broadcast.
+func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) (*ws.MatchCompletePayload, error) {
 	unlock, err := s.stateMgr.LockMatch(ctx, matchID)
 	if err != nil {
-		return fmt.Errorf("acquire lock: %w", err)
+		return nil, fmt.Errorf("acquire lock: %w", err)
 	}
 	defer unlock()
 
@@ -521,13 +523,13 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 	// Get all player states
 	states, err := s.stateMgr.GetAllPlayerStates(ctx, matchID)
 	if err != nil {
-		return fmt.Errorf("get states: %w", err)
+		return nil, fmt.Errorf("get states: %w", err)
 	}
 
 	// Get match questions and config
 	questions, err := s.stateMgr.GetMatchQuestions(ctx, matchID)
 	if err != nil {
-		return fmt.Errorf("get questions: %w", err)
+		return nil, fmt.Errorf("get questions: %w", err)
 	}
 
 	// Get per-question timeout from match config
@@ -650,7 +652,7 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 		Status:  StatusCompleted,
 	}
 	if err := s.matchRepo.UpdateStatus(ctx, updateParams); err != nil {
-		return fmt.Errorf("update match status: %w", err)
+		return nil, fmt.Errorf("update match status: %w", err)
 	}
 
 	if leaderboardEligible && s.leaderboard != nil && len(leaderboardReqs) > 0 {
@@ -683,10 +685,51 @@ func (s *Service) FinalizeMatch(ctx context.Context, matchID uuid.UUID) error {
 		}
 	}
 
-	return nil
+	// Build match complete payload
+	results := make([]ws.MatchResult, len(states))
+	for i, state := range states {
+		finalScore := 0
+		if state.FinalScore != nil {
+			finalScore = *state.FinalScore
+		}
+		accuracy := 0.0
+		if state.Accuracy != nil {
+			accuracy = *state.Accuracy
+		}
+		streakBonus := 0.0
+		if state.StreakBonusPct != nil {
+			streakBonus = *state.StreakBonusPct
+		}
+
+		results[i] = ws.MatchResult{
+			UserID:             state.UserID.String(),
+			Username:           state.Username,
+			FinalScore:         finalScore,
+			Accuracy:           accuracy,
+			StreakBonusApplied: streakBonus,
+			Status:             state.Status,
+		}
+	}
+
+	// Get leaderboard position if eligible (simplified - would need actual lookup)
+	leaderboardPosition := 0
+
+	payload := &ws.MatchCompletePayload{
+		MatchID:             matchID.String(),
+		Results:             results,
+		LeaderboardEligible: leaderboardEligible,
+		LeaderboardPosition: leaderboardPosition,
+	}
+
+	return payload, nil
 }
 
 // CreateRoom creates a private room via RoomManager.
 func (s *Service) CreateRoom(ctx context.Context, req PrivateRoomRequest) (string, *PrivateRoom, error) {
 	return s.roomMgr.CreateRoom(ctx, req)
+}
+
+// GetRoom retrieves a private room by code.
+func (s *Service) GetRoom(ctx context.Context, roomCode string) (*PrivateRoom, error) {
+	return s.roomMgr.GetRoom(roomCode)
 }

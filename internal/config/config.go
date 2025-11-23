@@ -23,6 +23,7 @@ type App struct {
 	Leaderboard Leaderboard
 	AI          AI
 	SMTP        SMTP
+	CORS        CORS
 }
 
 // Postgres captures connection info for the SQL database.
@@ -83,6 +84,15 @@ type SMTP struct {
 	Username  string `env:"SMTP_USERNAME"`
 	Password  string `env:"SMTP_PASSWORD"`
 	FromEmail string `env:"SMTP_FROM_EMAIL"`
+}
+
+// CORS holds Cross-Origin Resource Sharing configuration.
+type CORS struct {
+	AllowedOrigins   []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000,http://127.0.0.1:3000"`
+	AllowedMethods   []string `env:"CORS_ALLOWED_METHODS" envSeparator:"," envDefault:"GET,POST,PUT,DELETE,OPTIONS"`
+	AllowedHeaders   []string `env:"CORS_ALLOWED_HEADERS" envSeparator:"," envDefault:"Content-Type,Authorization"`
+	AllowCredentials bool     `env:"CORS_ALLOW_CREDENTIALS" envDefault:"true"`
+	MaxAge           int      `env:"CORS_MAX_AGE" envDefault:"3600"`
 }
 
 // Load parses environment variables into App config.

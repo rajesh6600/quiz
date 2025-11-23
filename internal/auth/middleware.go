@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gokatarajesh/quiz-platform/internal/auth/jwt"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // AuthMiddleware validates JWT tokens and injects user claims into request context.
@@ -24,7 +25,7 @@ func AuthMiddleware(authSvc *Service, logger zerolog.Logger) func(http.Handler) 
 			// Parse "Bearer <token>"
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "Invalid authorization header", http.StatusUnauthorized)
+				httperrors.RespondUnauthorized(w, httperrors.ErrCodeInvalidToken, "Invalid authorization header")
 				return
 			}
 
@@ -32,7 +33,7 @@ func AuthMiddleware(authSvc *Service, logger zerolog.Logger) func(http.Handler) 
 			claims, err := authSvc.ValidateToken(token)
 			if err != nil {
 				logger.Warn().Err(err).Msg("token validation failed")
-				http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+				httperrors.RespondUnauthorized(w, httperrors.ErrCodeInvalidToken, "Invalid or expired token")
 				return
 			}
 
@@ -49,7 +50,7 @@ func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value("claims").(*jwt.Claims)
 		if !ok || claims == nil {
-			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			httperrors.RespondUnauthorized(w, httperrors.ErrCodeAuthenticationRequired, "Authentication required")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -61,7 +62,7 @@ func RequireRegistered(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value("claims").(*jwt.Claims)
 		if !ok || claims == nil || claims.IsGuest {
-			http.Error(w, "Registered account required", http.StatusForbidden)
+			httperrors.RespondForbidden(w, httperrors.ErrCodeForbidden, "Registered account required")
 			return
 		}
 		next.ServeHTTP(w, r)

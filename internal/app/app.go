@@ -199,7 +199,7 @@ func New(ctx context.Context, cfg *config.App) (*Application, error) {
 		)
 	}
 
-	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, matchRoomHandler, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
+	apiServer := server.NewHTTPServer(cfg, logger, pool, redisClient, authHandlers, matchHTTPHandlers.GetRoom, matchRoomHandler, matchWSHandler.HandleWebSocket, lbHTTPHandler.HandleGet)
 
 	return &Application{
 		cfg:            cfg,

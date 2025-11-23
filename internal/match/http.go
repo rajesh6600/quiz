@@ -3,10 +3,12 @@ package match
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 
 	"github.com/gokatarajesh/quiz-platform/internal/auth/jwt"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // HTTPHandlers provides REST endpoints for match operations.
@@ -26,33 +28,38 @@ func NewHTTPHandlers(service *Service, logger zerolog.Logger) *HTTPHandlers {
 // CreateRoom handles POST /v1/rooms
 func (h *HTTPHandlers) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	// Extract JWT claims from context (set by auth middleware)
 	claims, ok := r.Context().Value("claims").(*jwt.Claims)
 	if !ok || claims == nil {
-		h.respondError(w, http.StatusUnauthorized, "authentication_required", "Authentication required")
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeAuthenticationRequired, "Authentication required")
 		return
 	}
 
 	// Validate user is registered (not guest)
 	if claims.IsGuest {
-		h.respondError(w, http.StatusForbidden, "guests_cannot_create_rooms", "Guests cannot create private rooms")
+		httperrors.RespondForbidden(w, httperrors.ErrCodeGuestsCannotCreateRooms, "Guests cannot create private rooms")
 		return
 	}
 
 	// Decode request body
 	var req CreateRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	// Validate request fields
 	if err := h.validateCreateRoomRequest(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "validation_failed", err.Error())
+		validationErr, ok := err.(*ValidationError)
+		if ok {
+			httperrors.RespondValidationError(w, httperrors.ErrCodeValidationFailed, validationErr.Message, validationErr.Field)
+		} else {
+			httperrors.RespondBadRequest(w, httperrors.ErrCodeValidationFailed, err.Error())
+		}
 		return
 	}
 
@@ -72,7 +79,7 @@ func (h *HTTPHandlers) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	roomCode, room, err := h.service.CreateRoom(r.Context(), privateRoomReq)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", claims.UserID.String()).Msg("failed to create room")
-		h.respondError(w, http.StatusInternalServerError, "room_creation_failed", err.Error())
+		httperrors.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -80,6 +87,50 @@ func (h *HTTPHandlers) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	response := h.roomToResponse(roomCode, room)
 
 	h.respondJSON(w, http.StatusCreated, response)
+}
+
+// GetRoom handles GET /v1/rooms/{room_code}
+func (h *HTTPHandlers) GetRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
+		return
+	}
+
+	// Extract room code from path: /v1/rooms/{room_code}
+	path := r.URL.Path
+	roomCode := strings.TrimPrefix(path, "/v1/rooms/")
+	roomCode = strings.TrimSuffix(roomCode, "/")
+
+	// Validate room code format (6 digits)
+	if len(roomCode) != 6 {
+		httperrors.RespondValidationError(w, httperrors.ErrCodeInvalidRoomCode, "Room code must be 6 digits", "room_code")
+		return
+	}
+
+	// Check if all characters are digits
+	for _, char := range roomCode {
+		if char < '0' || char > '9' {
+			httperrors.RespondValidationError(w, httperrors.ErrCodeInvalidRoomCode, "Room code must be numeric", "room_code")
+			return
+		}
+	}
+
+	// Get room
+	room, err := h.service.GetRoom(r.Context(), roomCode)
+	if err != nil {
+		if err.Error() == "room not found" {
+			httperrors.RespondNotFound(w, httperrors.ErrCodeRoomNotFound, "Room not found")
+			return
+		}
+		h.logger.Error().Err(err).Str("room_code", roomCode).Msg("failed to get room")
+		httperrors.RespondInternalError(w, err.Error())
+		return
+	}
+
+	// Convert room to response format
+	response := h.roomToResponse(roomCode, room)
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // validateCreateRoomRequest validates the CreateRoomRequest payload.
@@ -143,12 +194,5 @@ func (h *HTTPHandlers) respondJSON(w http.ResponseWriter, status int, data inter
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
-}
-
-func (h *HTTPHandlers) respondError(w http.ResponseWriter, status int, code, message string) {
-	h.respondJSON(w, status, map[string]interface{}{
-		"error":   code,
-		"message": message,
-	})
 }
 

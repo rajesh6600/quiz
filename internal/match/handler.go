@@ -13,6 +13,7 @@ import (
 	"github.com/gokatarajesh/quiz-platform/internal/auth"
 	"github.com/gokatarajesh/quiz-platform/internal/match/queue"
 	ws "github.com/gokatarajesh/quiz-platform/pkg/http/ws"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // Handler manages WebSocket connections and routes match-related messages.
@@ -71,14 +72,14 @@ func (h *Handler) handleMessage(ctx context.Context, userID uuid.UUID, username 
 	case ws.TypeRequestProgress:
 		return h.handleRequestProgress(ctx, userID, msg.Payload)
 	default:
-		return h.sendError(userID, "unknown_message_type", fmt.Sprintf("Unknown message type: %s", msg.Type))
+		return h.sendError(userID, httperrors.ErrCodeUnknownMessageType, fmt.Sprintf("Unknown message type: %s", msg.Type))
 	}
 }
 
 func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, username string, isGuest bool, payload json.RawMessage) error {
 	var req ws.JoinQueuePayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid join_queue payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid join_queue payload")
 	}
 
 	// Get category from client, default to "general"
@@ -88,7 +89,7 @@ func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, usernam
 	}
 
 	// Enqueue player
-	queueToken, pair, err := h.service.queueMgr.Enqueue(ctx, queue.MatchmakingRequest{
+		queueToken, pair, err := h.service.queueMgr.Enqueue(ctx, queue.MatchmakingRequest{
 		UserID:            userID,
 		Username:          username,
 		IsGuest:           isGuest,
@@ -96,7 +97,7 @@ func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, usernam
 		BotOK:             true,
 	})
 	if err != nil {
-		return h.sendError(userID, "enqueue_failed", err.Error())
+		return h.sendError(userID, httperrors.ErrCodeEnqueueFailed, err.Error())
 	}
 
 	// If match found immediately
@@ -111,7 +112,7 @@ func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, usernam
 		}
 		match, questions, err := h.service.CreateRandomMatch(ctx, pair, questionCount, 15, category)
 		if err != nil {
-			return h.sendError(userID, "match_creation_failed", err.Error())
+			return h.sendError(userID, httperrors.ErrCodeMatchCreationFailed, err.Error())
 		}
 
 		// Join match in hub
@@ -160,31 +161,34 @@ func (h *Handler) handleJoinQueue(ctx context.Context, userID uuid.UUID, usernam
 func (h *Handler) handleCancelQueue(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
 	var req ws.CancelQueuePayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid cancel_queue payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid cancel_queue payload")
 	}
 
 	queueToken, err := uuid.Parse(req.QueueToken)
 	if err != nil {
-		return h.sendError(userID, "invalid_token", "Invalid queue token")
+		return h.sendError(userID, httperrors.ErrCodeInvalidQueueToken, "Invalid queue token")
 	}
 
 	return h.service.queueMgr.Dequeue(ctx, queueToken)
 }
 
 func (h *Handler) handleAcceptBotFill(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
-	// Bot fill logic - for MVP, return error (not implemented yet)
-	return h.sendError(userID, "not_implemented", "Bot fill not yet implemented")
+	// TODO: Implement bot fill feature
+	// When a player has waited in queue for a configured duration (default 10s),
+	// offer them a bot opponent. If accepted, create a match with a bot player.
+	// Bot should have configurable difficulty and answer questions with realistic timing.
+	return h.sendError(userID, httperrors.ErrCodeFeatureNotAvailable, "Bot fill feature is not yet available")
 }
 
 func (h *Handler) handleJoinPrivate(ctx context.Context, userID uuid.UUID, username string, isGuest bool, payload json.RawMessage) error {
 	var req ws.JoinPrivatePayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid join_private payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid join_private payload")
 	}
 
 	room, err := h.service.roomMgr.JoinRoom(ctx, req.RoomCode, userID, username, isGuest)
 	if err != nil {
-		return h.sendError(userID, "join_failed", err.Error())
+		return h.sendError(userID, httperrors.ErrCodeJoinFailed, err.Error())
 	}
 
 	// Check if this is the first non-host player joining (trigger question generation)
@@ -205,13 +209,13 @@ func (h *Handler) handleJoinPrivate(ctx context.Context, userID uuid.UUID, usern
 
 		match, questions, err := h.service.CreatePrivateMatch(ctx, req.RoomCode, players, room.QuestionCount, room.PerQuestionSeconds, room.Category)
 		if err != nil {
-			return h.sendError(userID, "match_creation_failed", err.Error())
+			return h.sendError(userID, httperrors.ErrCodeMatchCreationFailed, err.Error())
 		}
 
 		// Update room with match ID
 		_, err = h.service.roomMgr.StartRoom(ctx, req.RoomCode, match.ID, room.StartCountdown)
 		if err != nil {
-			return h.sendError(userID, "room_start_failed", err.Error())
+			return h.sendError(userID, httperrors.ErrCodeRoomStartFailed, err.Error())
 		}
 
 		// Join all players to match in hub
@@ -250,24 +254,27 @@ func (h *Handler) handleJoinPrivate(ctx context.Context, userID uuid.UUID, usern
 }
 
 func (h *Handler) handleReadyState(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
-	// Ready state for private rooms - not implemented in MVP
-	return nil
+	// TODO: Implement ready state feature for private rooms
+	// Both players should be able to indicate they're ready before the match starts.
+	// Once both players are ready, start a countdown and then begin the match.
+	// This allows players to prepare before questions are sent.
+	return h.sendError(userID, httperrors.ErrCodeFeatureNotAvailable, "Ready state feature is not yet available")
 }
 
 func (h *Handler) handleSubmitAnswer(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
 	var req ws.SubmitAnswerPayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid submit_answer payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid submit_answer payload")
 	}
 
 	matchID, err := uuid.Parse(req.MatchID)
 	if err != nil {
-		return h.sendError(userID, "invalid_match_id", "Invalid match ID")
+		return h.sendError(userID, httperrors.ErrCodeInvalidMatchID, "Invalid match ID")
 	}
 
 	submittedAt := time.Now()
 	if err := h.service.SubmitAnswer(ctx, matchID, userID, req.QuestionToken, req.Answer, submittedAt); err != nil {
-		return h.sendError(userID, "submit_failed", err.Error())
+		return h.sendError(userID, httperrors.ErrCodeSubmitFailed, err.Error())
 	}
 
 	// Send acknowledgment
@@ -285,22 +292,44 @@ func (h *Handler) handleSubmitAnswer(ctx context.Context, userID uuid.UUID, payl
 func (h *Handler) handleLeaveMatch(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
 	var req ws.LeaveMatchPayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid leave_match payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid leave_match payload")
 	}
 
 	matchID, err := uuid.Parse(req.MatchID)
 	if err != nil {
-		return h.sendError(userID, "invalid_match_id", "Invalid match ID")
+		return h.sendError(userID, httperrors.ErrCodeInvalidMatchID, "Invalid match ID")
 	}
 
 	h.hub.LeaveMatch(matchID, userID)
 	return nil
 }
 
+// FinalizeAndBroadcastMatch finalizes a match and broadcasts results to all players.
+// This should be called when a match ends (all questions answered or timeout).
+func (h *Handler) FinalizeAndBroadcastMatch(ctx context.Context, matchID uuid.UUID) error {
+	payload, err := h.service.FinalizeMatch(ctx, matchID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("match_id", matchID.String()).Msg("failed to finalize match")
+		return err
+	}
+
+	// Broadcast match complete event to all players in the match
+	msg := ws.Message{Type: ws.TypeMatchComplete}
+	msg.Payload, _ = json.Marshal(payload)
+	h.hub.BroadcastToMatch(matchID, msg)
+
+	h.logger.Info().
+		Str("match_id", matchID.String()).
+		Int("player_count", len(payload.Results)).
+		Msg("match finalized and results broadcasted")
+
+	return nil
+}
+
 func (h *Handler) handleRequestProgress(ctx context.Context, userID uuid.UUID, payload json.RawMessage) error {
 	var req ws.RequestProgressPayload
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return h.sendError(userID, "invalid_payload", "Invalid request_progress payload")
+		return h.sendError(userID, httperrors.ErrCodeInvalidPayload, "Invalid request_progress payload")
 	}
 
 	// TODO: fetch and send progress

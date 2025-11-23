@@ -147,10 +147,23 @@ type MatchmakingRequest struct {
 	BotOK               bool
 }
 
+// normalizeCategory normalizes category string, defaulting to "general" if empty.
+func normalizeCategory(category string) string {
+	if category == "" {
+		return "general"
+	}
+	return category
+}
+
 func (m *Manager) isCompatible(p1, p2 *WaitingPlayer) bool {
-	// Simple compatibility: both must be OK with bot OR both real players
-	// For MVP, we match any two players (preferences ignored for speed)
-	_ = p1
-	_ = p2
+	// Match players with the same category/topic
+	category1 := normalizeCategory(p1.PreferredCategory)
+	category2 := normalizeCategory(p2.PreferredCategory)
+	
+	if category1 != category2 {
+		return false
+	}
+	
+	// Additional compatibility checks can be added here (bot OK, difficulty, etc.)
 	return true
 }

@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,21 +14,94 @@ import (
 
 	"github.com/gokatarajesh/quiz-platform/internal/auth"
 	"github.com/gokatarajesh/quiz-platform/internal/config"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // WSUpgrader handles WebSocket upgrades (configure CORS/security as needed).
+// CheckOrigin will be set dynamically based on CORS config.
 var WSUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		// TODO: implement proper origin checking for production
-		return true
-	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
 
+// corsMiddleware creates a CORS middleware handler.
+func corsMiddleware(cfg config.CORS, logger zerolog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			// Check if origin is allowed
+			allowedOrigin := ""
+			if origin != "" {
+				for _, allowed := range cfg.AllowedOrigins {
+					if origin == allowed {
+						allowedOrigin = origin
+						break
+					}
+				}
+			}
+
+			// Set CORS headers
+			if allowedOrigin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			}
+
+			// Set other CORS headers
+			if len(cfg.AllowedMethods) > 0 {
+				w.Header().Set("Access-Control-Allow-Methods", strings.Join(cfg.AllowedMethods, ","))
+			}
+			if len(cfg.AllowedHeaders) > 0 {
+				w.Header().Set("Access-Control-Allow-Headers", strings.Join(cfg.AllowedHeaders, ","))
+			}
+			if cfg.AllowCredentials {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+			if cfg.MaxAge > 0 {
+				w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", cfg.MaxAge))
+			}
+
+			// Handle preflight OPTIONS request
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			// Log CORS violations
+			if origin != "" && allowedOrigin == "" {
+				logger.Warn().
+					Str("origin", origin).
+					Strs("allowed_origins", cfg.AllowedOrigins).
+					Msg("CORS: blocked request from disallowed origin")
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// createWSOriginChecker creates a function to check WebSocket origins based on CORS config.
+func createWSOriginChecker(cfg config.CORS) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Allow requests without Origin header (same-origin or non-browser clients)
+			return true
+		}
+
+		// Check against allowed origins
+		for _, allowed := range cfg.AllowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+
+		return false
+	}
+}
+
 // NewHTTPServer wires base routes (health, metrics) for the API service.
 // authHandlers can be nil if auth is not yet initialized.
-func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, matchRoomHandler http.Handler, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
+func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, redis *redis.Client, authHandlers *auth.HTTPHandlers, matchGetRoomHandler http.HandlerFunc, matchRoomHandler http.Handler, matchWSHandler http.HandlerFunc, leaderboardHandler http.HandlerFunc) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +116,7 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		ctx := loggingContext(r.Context(), logger)
 		if err := pingDependencies(ctx, pool, redis); err != nil {
 			logger.Error().Err(err).Msg("dependency ping failed")
-			http.Error(w, "upstream error", http.StatusBadGateway)
+			httperrors.RespondError(w, http.StatusBadGateway, httperrors.ErrCodeUpstreamError, "Upstream error")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -68,7 +143,7 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		mux.HandleFunc("/ws/matches", matchWSHandler)
 	} else {
 		mux.HandleFunc("/ws/matches", func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "WebSocket handler not yet integrated", http.StatusNotImplemented)
+			httperrors.RespondError(w, http.StatusNotImplemented, httperrors.ErrCodeNotImplemented, "WebSocket handler not yet integrated")
 		})
 	}
 
@@ -78,14 +153,25 @@ func NewHTTPServer(cfg *config.App, logger zerolog.Logger, pool *pgxpool.Pool, r
 		mux.HandleFunc("/v1/leaderboards/private/", leaderboardHandler)
 	}
 
-	// Match endpoints (rooms) - handler is already wrapped with middleware
+	// Match endpoints (rooms)
+	// POST /v1/rooms - Create room (requires auth, wrapped with middleware)
 	if matchRoomHandler != nil {
 		mux.Handle("/v1/rooms", matchRoomHandler)
 	}
+	// GET /v1/rooms/{room_code} - Get room details (public, no auth)
+	if matchGetRoomHandler != nil {
+		mux.HandleFunc("/v1/rooms/", matchGetRoomHandler)
+	}
+
+	// Apply CORS middleware to all routes
+	handler := corsMiddleware(cfg.CORS, logger)(mux)
+
+	// Update WebSocket upgrader with CORS origin checking
+	WSUpgrader.CheckOrigin = createWSOriginChecker(cfg.CORS)
 
 	return &http.Server{
 		Addr:    cfg.HTTPAddr,
-		Handler: mux,
+		Handler: handler,
 	}
 }
 

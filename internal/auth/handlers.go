@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gokatarajesh/quiz-platform/internal/auth/jwt"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // HTTPHandlers provides REST endpoints for authentication.
@@ -31,19 +32,19 @@ func NewHTTPHandlers(authSvc *Service, oauthSvc *OAuthService, logger zerolog.Lo
 // Register handles POST /v1/auth/register
 func (h *HTTPHandlers) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	user, tokens, err := h.authSvc.Register(r.Context(), req)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "registration_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeRegistrationFailed, err.Error())
 		return
 	}
 
@@ -61,19 +62,19 @@ func (h *HTTPHandlers) Register(w http.ResponseWriter, r *http.Request) {
 // Login handles POST /v1/auth/login
 func (h *HTTPHandlers) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	user, tokens, err := h.authSvc.Login(r.Context(), req)
 	if err != nil {
-		h.respondError(w, http.StatusUnauthorized, "login_failed", err.Error())
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeLoginFailed, err.Error())
 		return
 	}
 
@@ -91,19 +92,19 @@ func (h *HTTPHandlers) Login(w http.ResponseWriter, r *http.Request) {
 // CreateGuest handles POST /v1/auth/guest
 func (h *HTTPHandlers) CreateGuest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req GuestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	user, tokens, err := h.authSvc.CreateGuest(r.Context(), req)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "guest_creation_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeGuestCreationFailed, err.Error())
 		return
 	}
 
@@ -119,19 +120,19 @@ func (h *HTTPHandlers) CreateGuest(w http.ResponseWriter, r *http.Request) {
 // ConvertGuest handles POST /v1/auth/convert
 func (h *HTTPHandlers) ConvertGuest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req ConvertGuestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	user, tokens, err := h.authSvc.ConvertGuest(r.Context(), req)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "conversion_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeConversionFailed, err.Error())
 		return
 	}
 
@@ -147,7 +148,7 @@ func (h *HTTPHandlers) ConvertGuest(w http.ResponseWriter, r *http.Request) {
 // RefreshToken handles POST /v1/auth/refresh
 func (h *HTTPHandlers) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
@@ -155,13 +156,13 @@ func (h *HTTPHandlers) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	tokens, err := h.authSvc.RefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
-		h.respondError(w, http.StatusUnauthorized, "refresh_failed", err.Error())
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeRefreshFailed, err.Error())
 		return
 	}
 
@@ -174,12 +175,12 @@ func (h *HTTPHandlers) RefreshToken(w http.ResponseWriter, r *http.Request) {
 // OAuthStart handles GET /v1/oauth/{provider}/start
 func (h *HTTPHandlers) OAuthStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	if h.oauthSvc == nil {
-		h.respondError(w, http.StatusServiceUnavailable, "oauth_not_configured", "OAuth is not configured")
+		httperrors.RespondServiceUnavailable(w, httperrors.ErrCodeOAuthNotConfigured, "OAuth is not configured")
 		return
 	}
 
@@ -194,7 +195,7 @@ func (h *HTTPHandlers) OAuthStart(w http.ResponseWriter, r *http.Request) {
 
 	authURL, err := h.oauthSvc.StartOAuthFlow(provider, state)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "oauth_start_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeOAuthStartFailed, err.Error())
 		return
 	}
 
@@ -217,12 +218,12 @@ func (h *HTTPHandlers) OAuthStart(w http.ResponseWriter, r *http.Request) {
 // OAuthCallback handles GET /v1/oauth/{provider}/callback
 func (h *HTTPHandlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	if h.oauthSvc == nil {
-		h.respondError(w, http.StatusServiceUnavailable, "oauth_not_configured", "OAuth is not configured")
+		httperrors.RespondServiceUnavailable(w, httperrors.ErrCodeOAuthNotConfigured, "OAuth is not configured")
 		return
 	}
 
@@ -236,28 +237,28 @@ func (h *HTTPHandlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 
 	if code == "" {
-		h.respondError(w, http.StatusBadRequest, "missing_code", "Authorization code required")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeOAuthMissingCode, "Authorization code required")
 		return
 	}
 
 	// Validate state (CSRF protection)
 	cookie, err := r.Cookie("oauth_state")
 	if err != nil || cookie.Value != state {
-		h.respondError(w, http.StatusBadRequest, "invalid_state", "Invalid or missing state parameter")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeOAuthInvalidState, "Invalid or missing state parameter")
 		return
 	}
 
 	// Exchange code for user info
 	userInfo, err := h.oauthSvc.HandleOAuthCallback(r.Context(), provider, code, state)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "oauth_callback_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeOAuthCallbackFailed, err.Error())
 		return
 	}
 
 	// Create or get user
 	user, tokens, err := h.oauthSvc.CreateOrGetOAuthUser(r.Context(), h.authSvc, provider, userInfo)
 	if err != nil {
-		h.respondError(w, http.StatusInternalServerError, "user_creation_failed", err.Error())
+		httperrors.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -283,14 +284,14 @@ func (h *HTTPHandlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 // GetMe handles GET /v1/users/me (requires auth middleware)
 func (h *HTTPHandlers) GetMe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	// Extract user from context (set by auth middleware)
 	claims, ok := r.Context().Value("claims").(*jwt.Claims)
 	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing token")
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeUnauthorized, "Invalid or missing token")
 		return
 	}
 
@@ -328,25 +329,25 @@ func (h *HTTPHandlers) GetMe(w http.ResponseWriter, r *http.Request) {
 // SetUsername handles POST /v1/users/me/username (requires auth middleware)
 func (h *HTTPHandlers) SetUsername(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	// Extract user from context (set by auth middleware)
 	claims, ok := r.Context().Value("claims").(*jwt.Claims)
 	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing token")
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeUnauthorized, "Invalid or missing token")
 		return
 	}
 
 	var req SetUsernameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	if req.Username == "" {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Username required")
+		httperrors.RespondValidationError(w, httperrors.ErrCodeMissingField, "Username required", "username")
 		return
 	}
 
@@ -361,15 +362,13 @@ func (h *HTTPHandlers) SetUsername(w http.ResponseWriter, r *http.Request) {
 				// Parse the suggestions array from the string
 				suggestionsStr := strings.Trim(parts[1], "[]")
 				suggestions := strings.Fields(suggestionsStr)
-				h.respondJSON(w, http.StatusConflict, map[string]interface{}{
-					"error":       "username_taken",
-					"message":     "Username is already taken",
+				httperrors.RespondErrorWithDetails(w, http.StatusConflict, httperrors.ErrCodeUsernameTaken, "Username is already taken", map[string]interface{}{
 					"suggestions": suggestions,
 				})
 				return
 			}
 		}
-		h.respondError(w, http.StatusBadRequest, "set_username_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeSetUsernameFailed, err.Error())
 		return
 	}
 
@@ -385,18 +384,18 @@ func (h *HTTPHandlers) SetUsername(w http.ResponseWriter, r *http.Request) {
 // ForgotPassword handles POST /v1/auth/forgot-password
 func (h *HTTPHandlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req ForgotPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	if req.Email == "" {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Email required")
+		httperrors.RespondValidationError(w, httperrors.ErrCodeMissingField, "Email required", "email")
 		return
 	}
 
@@ -415,23 +414,23 @@ func (h *HTTPHandlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 // ResetPassword handles POST /v1/auth/reset-password
 func (h *HTTPHandlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		httperrors.RespondError(w, http.StatusMethodNotAllowed, httperrors.ErrCodeInvalidRequest, "Method not allowed")
 		return
 	}
 
 	var req ResetPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON payload")
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeInvalidRequest, "Invalid JSON payload")
 		return
 	}
 
 	if req.Token == "" || req.NewPassword == "" {
-		h.respondError(w, http.StatusBadRequest, "invalid_request", "Token and new password required")
+		httperrors.RespondValidationError(w, httperrors.ErrCodeMissingField, "Token and new password required", "")
 		return
 	}
 
 	if err := h.authSvc.ResetPassword(r.Context(), req.Token, req.NewPassword); err != nil {
-		h.respondError(w, http.StatusBadRequest, "reset_failed", err.Error())
+		httperrors.RespondBadRequest(w, httperrors.ErrCodeResetFailed, err.Error())
 		return
 	}
 
@@ -444,13 +443,6 @@ func (h *HTTPHandlers) respondJSON(w http.ResponseWriter, status int, data inter
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
-}
-
-func (h *HTTPHandlers) respondError(w http.ResponseWriter, status int, code, message string) {
-	h.respondJSON(w, status, map[string]interface{}{
-		"error":   code,
-		"message": message,
-	})
 }
 
 // extractProviderFromPath extracts provider name from URL path.

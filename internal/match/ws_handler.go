@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gokatarajesh/quiz-platform/internal/server"
+	httperrors "github.com/gokatarajesh/quiz-platform/pkg/http/errors"
 )
 
 // HandleWebSocket upgrades HTTP connection to WebSocket and authenticates user.
@@ -11,7 +12,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Extract and validate token from query parameter
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		http.Error(w, "Missing token", http.StatusUnauthorized)
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeInvalidToken, "Missing token")
 		return
 	}
 
@@ -19,7 +20,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authSvc.ValidateToken(token)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("WebSocket token validation failed")
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		httperrors.RespondUnauthorized(w, httperrors.ErrCodeInvalidToken, "Invalid token")
 		return
 	}
 
